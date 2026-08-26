@@ -50,6 +50,16 @@ while read -r kind path; do
     system)
       src="$path"; dst="$REPO/system${path}"
       [ -e "$src" ] || { warn "$path (not on this machine, skipped)"; continue; }
+      # Guard: if the repo copy differs from the live file AND the repo copy is
+      # committed and clean, that is an intended edit not yet installed. Copying
+      # live over it would silently revert the change. Skip and say so.
+      if [ -f "$dst" ] && ! cmp -s "$src" "$dst"; then
+        if git -C "$REPO" diff --quiet HEAD -- "system${path}" 2>/dev/null; then
+          warn "$path: repo copy is committed and differs from live -- NOT overwriting"
+          warn "   install it first:  ./install.sh --only system"
+          continue
+        fi
+      fi
       mkdir -p "$(dirname "$dst")"
       if cp -a "$src" "$dst" 2>/dev/null; then ok "$path"
       else sudo cat "$src" > "$dst" 2>/dev/null && ok "$path (via sudo)" || warn "$path (unreadable)"; fi

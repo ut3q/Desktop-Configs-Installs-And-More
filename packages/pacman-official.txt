@@ -51,6 +51,7 @@ jq
 kdeconnect
 kvantum
 kvantum-qt5
+lact
 lazygit
 lib32-gamemode
 lib32-mangohud
