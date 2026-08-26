@@ -25,6 +25,7 @@ RSYNC_EX=(
   --exclude='*.log' --exclude='*.sock' --exclude='*.pid'
   --exclude='*.sqlite-wal' --exclude='*.sqlite-shm'
   --exclude='*cookies*' --exclude='*.cookies'
+  --exclude='/jan'                     # 9MB downloaded binary in .local/bin, not a script
   --exclude='dist/' --exclude='equicord.asar' --exclude='build/'
   --exclude='.git/'
 )

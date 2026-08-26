@@ -2,14 +2,12 @@ bibata-cursor-theme-bin
 caelestia-cli
 caelestia-firefox-theme
 caelestia-shell
-darkly-bin
 glfw-wayland-minecraft-cursorfix
 helium-browser-bin
 legcord-bin
 opentabletdriver
 papirus-folders
 paru
-paru-debug
 pear-desktop
 qdirstat-bin
 qt5ct-kde
@@ -18,5 +16,4 @@ shiru
 sunshine-bin
 vscodium-bin
 vscodium-bin-marketplace
-wally-git
 wdotool-bin

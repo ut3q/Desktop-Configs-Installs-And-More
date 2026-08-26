@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=osu!
+MimeType=x-scheme-handler/osu;
+Exec=/home/aqua/.local/bin/osu-wine --osuhandler %u
+NoDisplay=true
+StartupNotify=true
+Icon=/home/aqua/.local/share/icons/osu-wine.png

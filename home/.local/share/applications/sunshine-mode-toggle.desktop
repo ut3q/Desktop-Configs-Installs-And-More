@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Sunshine: Toggle Capture Mode
+Comment=Swap between mirroring this screen and a virtual display at the client's resolution
+Exec=/home/aqua/.local/bin/sunshine-mode toggle
+Icon=video-display
+Terminal=false
+Categories=Utility;

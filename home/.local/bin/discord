@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+discord-updater --check >/dev/null 2>&1 || discord-updater
+exec /opt/discord/Discord "$@"

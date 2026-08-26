@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=osu!
+Comment=osu! - pick a server, then play
+Type=Application
+Exec=/home/aqua/.local/bin/osu-server-picker %U
+Icon=/home/aqua/.local/share/icons/osu-wine.png
+Terminal=false
+Categories=Wine;Game;
+StartupNotify=false
+StartupWMClass=osu!.exe

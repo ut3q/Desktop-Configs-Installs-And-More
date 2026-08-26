@@ -1,0 +1,142 @@
+#!/usr/bin/env bash
+# sunshine-virtual-session — enter/leave the virtual-display layout.
+#
+#   enter   size the headless output to the client and DISABLE the physical
+#           monitor, so Hyprland migrates every workspace onto the virtual
+#           screen. Called by global_prep_cmd (which has SUNSHINE_CLIENT_*)
+#           and again by the watcher on reconnect after a swipe-away.
+#   leave   re-enable the physical monitor. Workspaces migrate back.
+#
+# Only acts when ~/.config/sunshine/mode says "virtual". In mirror mode every
+# subcommand is a no-op, so it is safe to wire up unconditionally.
+
+set -uo pipefail
+
+MODE_FILE="${HOME}/.config/sunshine/mode"
+CONF="${HOME}/.config/sunshine/sunshine.conf"
+STATE_DIR="${XDG_RUNTIME_DIR:-/tmp}/sunshine-virtual"
+VD_POS="9999x0"
+FALLBACK_MODE="1920x1080@60"
+
+log() { printf '[virtual] %s\n' "$*" >&2; }
+
+# The mode file is intent; sunshine.conf's output_name is what Sunshine is
+# ACTUALLY capturing. They diverge for ~10s during a mode switch, and acting on
+# intent alone meant blanking DP-3 while Sunshine was still capturing DP-3 --
+# a black screen with no apps. output_name is the authority.
+configured_output() {
+  sed -n 's/^output_name[[:space:]]*=[[:space:]]*//p' "$CONF" 2>/dev/null | head -1
+}
+
+OUT=$(configured_output)
+case "$OUT" in
+  HEADLESS-*) : ;;   # Sunshine really is capturing a virtual output
+  *)
+    printf '[virtual] Sunshine is capturing "%s", not a headless output -- no-op\n' "${OUT:-unset}" >&2
+    exit 0 ;;
+esac
+[ "$(cat "$MODE_FILE" 2>/dev/null || echo mirror)" = "virtual" ] || exit 0
+
+if [ -z "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
+  d="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hypr"
+  [ -d "$d" ] && export HYPRLAND_INSTANCE_SIGNATURE="$(find "$d" -maxdepth 1 -mindepth 1 -type d -printf '%T@ %f\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2)"
+fi
+hyprctl version >/dev/null 2>&1 || { log "cannot reach Hyprland"; exit 1; }
+
+headless_name() {
+  hyprctl monitors all -j | python3 -c 'import sys,json;print(next((m["name"] for m in json.load(sys.stdin) if m["name"].startswith("HEADLESS-")),""))'
+}
+physical_names() {
+  hyprctl monitors all -j | python3 -c 'import sys,json;[print(m["name"]) for m in json.load(sys.stdin) if not m["name"].startswith("HEADLESS-")]'
+}
+is_active() {  # $1=monitor -> 0 if currently enabled
+  hyprctl monitors -j | python3 -c "
+import sys, json
+sys.exit(0 if any(m['name'] == '$1' for m in json.load(sys.stdin)) else 1)"
+}
+
+# Caelestia instantiates a FULL shell on every screen it is not told to skip:
+# bar, background and the blurred drawers overlay, plus a 48px bar reservation.
+# On the headless output that is ~71MB of qs RSS and a clock-tick repaint loop
+# on a screen nobody is looking at -- but while a client IS streaming, that
+# output is the remote desktop and the bar has to be there. So follow the
+# session: on during a stream, off the rest of the time.
+# services/Screens.qml filters on GlobalConfig.forScreen(name).enabled.
+shell_on_headless() {  # $1 = true|false
+  local name dir
+  name=$(headless_name)
+  [ -z "$name" ] && return 0
+  dir="${HOME}/.config/caelestia/monitors/${name}"
+  mkdir -p "$dir"
+  printf '{"enabled": %s}\n' "$1" > "$dir/shell.json"
+  log "caelestia shell on $name: $1"
+}
+
+cmd_enter() {
+  local name mode w h fps
+  name=$(headless_name)
+  [ -z "$name" ] && { log "no headless output; run 'sunshine-mode virtual' first"; exit 1; }
+  if [ "$name" != "$OUT" ]; then
+    log "MISMATCH: Sunshine captures '$OUT' but the live headless is '$name'; refusing to blank the monitor"
+    exit 1
+  fi
+
+  mkdir -p "$STATE_DIR"
+  w=${SUNSHINE_CLIENT_WIDTH:-}; h=${SUNSHINE_CLIENT_HEIGHT:-}; fps=${SUNSHINE_CLIENT_FPS:-60}
+  if [ -n "$w" ] && [ -n "$h" ]; then
+    mode="${w}x${h}@${fps}"
+    printf '%s\n' "$mode" > "$STATE_DIR/mode"      # remembered for reconnects
+  else
+    mode=$(cat "$STATE_DIR/mode" 2>/dev/null || echo "$FALLBACK_MODE")
+  fi
+
+  hyprctl eval "hl.monitor({output=\"$name\", mode=\"$mode\", position=\"$VD_POS\", scale=1})" >/dev/null
+  shell_on_headless true
+  sleep 0.3
+
+  # Disabling the physical monitor is what migrates the workspaces -- Hyprland
+  # relocates everything off a monitor that goes away. There is no working
+  # moveworkspacetomonitor under the Lua config, so this is the mechanism.
+  if [ -f "$STATE_DIR/blanked" ]; then
+    log "already entered; only resized to $mode"
+    return 0
+  fi
+  physical_names | while read -r p; do
+    [ -z "$p" ] && continue
+    echo "$p" >> "$STATE_DIR/blanked"
+    hyprctl eval "hl.monitor({output=\"$p\", disabled=true})" >/dev/null
+  done
+  sleep 0.5
+  log "entered: $name @ $mode, physical monitor(s) blanked"
+}
+
+cmd_leave() {
+  local restored=0
+  shell_on_headless false
+  if [ -f "$STATE_DIR/blanked" ]; then
+    while read -r p; do
+      [ -z "$p" ] && continue
+      hyprctl eval "hl.monitor({output=\"$p\", disabled=false})" >/dev/null
+      restored=1
+    done < "$STATE_DIR/blanked"
+    rm -f "$STATE_DIR/blanked"
+  fi
+  # Belt and braces: re-enable anything not currently active, whatever the
+  # state file says. Being left without a display is the one unacceptable
+  # failure mode here.
+  hyprctl monitors all -j | python3 -c '
+import sys, json
+for m in json.load(sys.stdin):
+    if not m["name"].startswith("HEADLESS-"):
+        print(m["name"])' | while read -r p; do
+    is_active "$p" || hyprctl eval "hl.monitor({output=\"$p\", disabled=false})" >/dev/null
+  done
+  sleep 0.4
+  [ "$restored" = "1" ] && log "left: physical monitor(s) restored" || log "nothing was blanked"
+}
+
+case "${1:-}" in
+  enter) cmd_enter ;;
+  leave) cmd_leave ;;
+  *) echo "usage: $(basename "$0") {enter|leave}" >&2; exit 2 ;;
+esac

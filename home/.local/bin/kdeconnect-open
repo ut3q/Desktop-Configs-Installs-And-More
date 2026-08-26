@@ -1,0 +1,4 @@
+#!/bin/bash
+id=$(echo "$1" | sed -E 's|kdeconnect://([^/]+)/?.*|\1|')
+exec thunar "/run/user/$(id -u)/$id/storage/emulated/0"
+

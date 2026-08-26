@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Gatari
+Comment=osu! - Rhythm is just a *click* away!
+Type=Application
+Exec=/home/aqua/.local/bin/osu-wine %U -devserver gatari.pw
+Icon=/home/aqua/.local/share/icons/osu-wine.png
+Terminal=false
+Categories=Wine;Game;
+Path=
+StartupNotify=false

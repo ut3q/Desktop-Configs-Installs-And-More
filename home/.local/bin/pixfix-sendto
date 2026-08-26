@@ -1,0 +1,6 @@
+#!/bin/bash
+# Convert the Linux path of the image to a Wine path
+WINE_IMAGE_PATH=$(winepath -w "$1")
+
+# Run Pixfix with the converted path
+wine "$HOME/Downloads/Pixfix.exe" "$WINE_IMAGE_PATH"

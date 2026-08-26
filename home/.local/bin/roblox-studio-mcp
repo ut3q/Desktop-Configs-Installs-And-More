@@ -1,0 +1,8 @@
+#!/bin/sh
+exec /usr/bin/flatpak run --command=sh org.vinegarhq.Vinegar -c '
+  export WINEPREFIX="$XDG_DATA_HOME/vinegar/prefixes/studio"
+  export WINEDEBUG=-all
+  exe=$(ls -1dt "$XDG_DATA_HOME"/vinegar/versions/*/StudioMCP.exe 2>/dev/null | head -n1)
+  [ -n "$exe" ] || { echo "StudioMCP.exe not found" >&2; exit 1; }
+  exec "$XDG_DATA_HOME/vinegar/kombucha/bin/wine" "$exe"
+'

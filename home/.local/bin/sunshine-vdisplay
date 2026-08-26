@@ -1,0 +1,362 @@
+#!/usr/bin/env bash
+# sunshine-vdisplay — Apollo-style virtual display for Hyprland.
+#
+# Creates a headless Hyprland output that Sunshine captures, so a streaming
+# client gets its own screen at its own resolution instead of mirroring the
+# physical monitor.
+#
+#   init     create the headless output, bind the remote workspace to it, and
+#            write its name into sunshine.conf. MUST run before Sunshine
+#            starts: Sunshine resolves output_name once at process start and
+#            caches it for the process lifetime.
+#   attach   called by Sunshine on client connect. Resizes the headless output
+#            to the client's resolution/refresh and moves the remote workspace
+#            onto it.
+#   detach   called by Sunshine on client disconnect. Restores defaults.
+#   status   print current state.
+#
+# NOTE ON hyprctl: this machine uses Hyprland's Lua config parser, under which
+# `hyprctl keyword` is refused ("keyword can't work with non-legacy parsers")
+# WHILE STILL EXITING 0. Every monitor/workspace change here therefore goes
+# through `hyprctl eval` and is verified by reading the state back.
+
+set -uo pipefail
+
+# ---- tunables ---------------------------------------------------------------
+VD_POS="9999x0"        # far off-screen; keeps the cursor from wandering in
+VD_DEFAULT_MODE="1920x1080@60"
+VD_SCALE=1
+# NAMED workspace, deliberately. Hyprland's `workspace +1` (which SUPER+scroll
+# is bound to) only walks numeric IDs, so a named workspace can never be
+# reached by normal workspace cycling. A numeric one here is a trap: the
+# headless output sits at 9999x0, so cycling onto it teleports the cursor to a
+# screen you cannot see and the mouse appears frozen.
+VD_WORKSPACE="remote"
+BLANK_PHYSICAL=0       # 1 = DPMS-off the physical monitor while streaming
+SUNSHINE_CONF="${HOME}/.config/sunshine/sunshine.conf"
+STATE_DIR="${XDG_RUNTIME_DIR:-/tmp}/sunshine-vdisplay"
+MIGRATE_DESKTOP=1      # 1 = move your active workspace to the virtual screen
+                       #     while streaming, and move it back afterwards.
+                       #     0 = stream an empty desktop instead.
+# -----------------------------------------------------------------------------
+
+log() { printf '[vdisplay] %s\n' "$*" >&2; }
+
+# Sunshine may run as a user service that never inherited the Hyprland env.
+# Recover the instance signature from the runtime dir if it is missing.
+if [ -z "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
+  hypr_dir="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hypr"
+  if [ -d "$hypr_dir" ]; then
+    sig=$(find "$hypr_dir" -maxdepth 1 -mindepth 1 -type d -printf '%T@ %f\n' 2>/dev/null \
+          | sort -rn | head -1 | cut -d' ' -f2)
+    [ -n "$sig" ] && export HYPRLAND_INSTANCE_SIGNATURE="$sig"
+  fi
+fi
+
+if ! hyprctl version >/dev/null 2>&1; then
+  log "cannot reach Hyprland (HYPRLAND_INSTANCE_SIGNATURE=${HYPRLAND_INSTANCE_SIGNATURE:-unset})"
+  exit 1
+fi
+
+headless_name() {
+  hyprctl monitors all -j 2>/dev/null \
+    | python3 -c 'import sys,json;print(next((m["name"] for m in json.load(sys.stdin) if m["name"].startswith("HEADLESS-")),""))'
+}
+
+physical_names() {
+  hyprctl monitors -j 2>/dev/null \
+    | python3 -c 'import sys,json;[print(m["name"]) for m in json.load(sys.stdin) if not m["name"].startswith("HEADLESS-")]'
+}
+
+# Apply a mode, then read it back. hyprctl never reports failure here, so the
+# read-back is the only real confirmation.
+set_mode() {  # $1=name $2=WxH@R
+  local want_w want_h
+  want_w=${2%%x*}
+  want_h=${2#*x}; want_h=${want_h%%@*}
+
+  hyprctl eval "hl.monitor({output=\"$1\", mode=\"$2\", position=\"$VD_POS\", scale=$VD_SCALE})" >/dev/null
+
+  local i
+  for i in $(seq 15); do
+    if hyprctl monitors -j 2>/dev/null | python3 -c "
+import sys, json
+m = next((m for m in json.load(sys.stdin) if m['name'] == '$1'), None)
+sys.exit(0 if m and m['width'] == $want_w and m['height'] == $want_h else 1)"; then
+      return 0
+    fi
+    sleep 0.2
+  done
+  log "WARNING: $1 did not reach $2 -- check 'hyprctl eval' support"
+  return 1
+}
+
+# Hyprland increments the headless counter on every `output create`, so the
+# name is NOT stable -- a removed HEADLESS-1 comes back as HEADLESS-2. Sunshine
+# resolves output_name once at startup, so the detected name has to land in the
+# config before it launches.
+sync_conf() {  # $1=name
+  [ -f "$SUNSHINE_CONF" ] || return 0
+  local current
+  current=$(sed -n 's/^output_name[[:space:]]*=[[:space:]]*//p' "$SUNSHINE_CONF" | head -1)
+  [ "$current" = "$1" ] && return 0
+  if grep -qE '^output_name' "$SUNSHINE_CONF"; then
+    sed -i "s|^output_name[[:space:]]*=.*|output_name = $1|" "$SUNSHINE_CONF"
+  else
+    printf 'output_name = %s\n' "$1" >> "$SUNSHINE_CONF"
+  fi
+  log "sunshine.conf output_name: ${current:-unset} -> $1"
+}
+
+# A newly created monitor steals an empty workspace. Send anything that is not
+# the remote workspace back where it came from.
+reclaim_strays() {  # $1=headless name
+  local phys
+  phys=$(physical_names | head -1)
+  [ -z "$phys" ] && return 0
+  hyprctl workspaces -j 2>/dev/null | python3 -c "
+import sys, json
+for w in json.load(sys.stdin):
+    if w['monitor'] == '$1' and w['name'] != '$VD_WORKSPACE' and not w['name'].startswith('special'):
+        print(w['name'])" | while read -r ws; do
+    [ -z "$ws" ] && continue
+    hyprctl dispatch moveworkspacetomonitor "$ws $phys" >/dev/null
+    log "returned workspace $ws to $phys"
+  done
+}
+
+# Declare the named workspace as a monitor's default. This MUST happen before
+# the output is created: Hyprland assigns every new monitor an active workspace
+# at creation time, and if no default rule matches it grabs the lowest free
+# numeric one -- which then becomes reachable by SUPER+scroll and teleports the
+# cursor to a screen at 9999x0 that you cannot see.
+declare_ws_rule() {  # $1=monitor name (need not exist yet)
+  hyprctl eval "hl.workspace_rule({workspace=\"name:$VD_WORKSPACE\", monitor=\"$1\", default=true, persistent=true})" >/dev/null
+}
+
+active_ws_of() {  # $1=monitor name
+  hyprctl monitors all -j | python3 -c "
+import sys, json
+m = next((m for m in json.load(sys.stdin) if m['name'] == '$1'), None)
+print(m['activeWorkspace']['name'] if m else '')"
+}
+
+# Caelestia builds a whole shell -- bar, background, blurred drawers overlay,
+# plus a 48px bar reservation -- on every screen it is not told to skip, and a
+# freshly created HEADLESS-N gets a fresh config dir that defaults to enabled.
+# That is ~60MB of qs RSS and a clock-tick repaint loop on a screen nobody is
+# watching. Default it OFF at init; sunshine-virtual-session's `enter` turns it
+# back on for the duration of an actual stream, when that output IS the desktop.
+# services/Screens.qml filters on GlobalConfig.forScreen(name).enabled.
+shell_on_headless() {  # $1=name  $2=true|false
+  local dir="${HOME}/.config/caelestia/monitors/$1" i want n
+  [ -z "$1" ] && return 0
+  mkdir -p "$dir"
+  # Caelestia writes its OWN per-screen config when a new output appears, and it
+  # does so on its own schedule -- so verifying the file we just wrote proves
+  # nothing, it only reads back our own bytes before Caelestia clobbers them.
+  # Verify the EFFECT instead: whether the shell actually has surfaces on that
+  # output. Rewrite each pass, because losing the race just means going again.
+  [ "$2" = "true" ] && want=gt || want=eq
+  for i in $(seq 8); do
+    printf '{"enabled": %s}\n' "$2" > "$dir/shell.json"
+    sleep 0.5
+    n=$(MON="$1" hyprctl layers -j | python3 -c '
+import sys, json, os
+d = json.load(sys.stdin).get(os.environ["MON"], {})
+print(sum(len(v) for v in d.get("levels", {}).values()))' 2>/dev/null || echo -1)
+    [ "$want" = "eq" ] && [ "$n" = "0" ] && return 0
+    [ "$want" = "gt" ] && [ "$n" -gt 0 ] 2>/dev/null && return 0
+  done
+  log "WARNING: caelestia shell on $1 would not settle to enabled=$2 (surfaces: $n)"
+}
+
+# Every headless output Hyprland creates gets a fresh HEADLESS-N name, and
+# Caelestia leaves a per-screen config dir behind for each one. Without this
+# they pile up -- 23 of them accumulated over one afternoon of mode switching.
+prune_stale_monitor_cfgs() {
+  local base="${HOME}/.config/caelestia/monitors" live d
+  [ -d "$base" ] || return 0
+  live=$(hyprctl monitors all -j | python3 -c 'import sys,json;print(" ".join(m["name"] for m in json.load(sys.stdin)))' 2>/dev/null) || return 0
+  for d in "$base"/HEADLESS-*; do
+    [ -d "$d" ] || continue
+    case " $live " in
+      *" $(basename "$d") "*) ;;
+      *) rm -rf "$d" ;;
+    esac
+  done
+}
+
+create_headless() {  # -> prints name
+  local name i
+  hyprctl output create headless >/dev/null
+  for i in $(seq 20); do
+    name=$(headless_name); [ -n "$name" ] && break
+    sleep 0.1
+  done
+  printf '%s\n' "$name"
+}
+
+cmd_init() {
+  local name next
+
+  # `mirror` mode captures the physical screen and wants no headless output at
+  # all. This runs unconditionally from Sunshine's ExecStartPre, so without this
+  # guard a mirror-mode start would create a stray output AND sync_conf would
+  # overwrite output_name with it, silently breaking mirror capture.
+  if [ "$(cat "${HOME}/.config/sunshine/mode" 2>/dev/null || echo mirror)" != "virtual" ]; then
+    log "mode is not 'virtual' -- no headless output needed"
+    return 0
+  fi
+
+  name=$(headless_name)
+  if [ -n "$name" ]; then
+    declare_ws_rule "$name"
+  else
+    # First attempt also tells us the counter. Hyprland increments HEADLESS-N on
+    # every create, so the name cannot be predicted from a cold start.
+    name=$(create_headless)
+    [ -z "$name" ] && { log "failed to create headless output"; exit 1; }
+
+    if [ "$(active_ws_of "$name")" != "$VD_WORKSPACE" ]; then
+      # It grabbed a numeric workspace. Now that the counter is known, redo it
+      # with the rule already in place.
+      next="HEADLESS-$(( ${name##*-} + 1 ))"
+      hyprctl output remove "$name" >/dev/null
+      sleep 0.5
+      declare_ws_rule "$next"
+      name=$(create_headless)
+      [ -z "$name" ] && { log "failed to recreate headless output"; exit 1; }
+    fi
+  fi
+
+  set_mode "$name" "$VD_DEFAULT_MODE"
+  sync_conf "$name"
+  shell_on_headless "$name" false
+  reclaim_strays "$name"
+
+  local ws
+  ws=$(active_ws_of "$name")
+  if [ "$ws" != "$VD_WORKSPACE" ]; then
+    log "WARNING: $name is showing workspace '$ws', not '$VD_WORKSPACE'."
+    log "         A numeric workspace there is reachable by SUPER+scroll and"
+    log "         will strand the cursor off-screen. Run '$(basename "$0") off'."
+  fi
+  log "ready: $name @ $VD_DEFAULT_MODE, workspace $ws"
+  printf '%s\n' "$name"
+}
+
+cmd_attach() {
+  local name w h fps mode phys cur_ws mx my
+
+  name=$(headless_name)
+  [ -z "$name" ] && { log "no headless output; run 'init' first"; exit 1; }
+
+  w=${SUNSHINE_CLIENT_WIDTH:-}
+  h=${SUNSHINE_CLIENT_HEIGHT:-}
+  fps=${SUNSHINE_CLIENT_FPS:-60}
+  if [ -n "$w" ] && [ -n "$h" ]; then
+    mode="${w}x${h}@${fps}"
+  else
+    mode="$VD_DEFAULT_MODE"
+    log "client did not report a resolution; using $mode"
+  fi
+
+  set_mode "$name" "$mode"
+
+  mkdir -p "$STATE_DIR"
+  phys=$(physical_names | head -1)
+
+  if [ "$MIGRATE_DESKTOP" = "1" ] && [ -n "$phys" ]; then
+    # Without this the client sees an empty desktop: the headless output owns
+    # only the (blank) named workspace, and the pointer is still over on the
+    # physical monitor, so there is no cursor in the captured frame either.
+    cur_ws=$(active_ws_of "$phys")
+    if [ -n "$cur_ws" ] && [ "$cur_ws" != "$VD_WORKSPACE" ]; then
+      printf '%s\n%s\n' "$cur_ws" "$phys" > "$STATE_DIR/migrated"
+      hyprctl dispatch moveworkspacetomonitor "$cur_ws $name" >/dev/null
+      log "moved workspace $cur_ws to $name for the stream"
+    fi
+  else
+    hyprctl dispatch moveworkspacetomonitor "name:$VD_WORKSPACE $name" >/dev/null
+  fi
+
+  hyprctl dispatch focusmonitor "$name" >/dev/null
+
+  # Warp the pointer onto the virtual screen, otherwise it stays on the
+  # physical monitor and never appears in the stream.
+  mx=$(hyprctl monitors all -j | python3 -c "
+import sys, json
+m = next((m for m in json.load(sys.stdin) if m['name'] == '$name'), None)
+print(m['x'] + m['width'] // 2 if m else 0)")
+  my=$(hyprctl monitors all -j | python3 -c "
+import sys, json
+m = next((m for m in json.load(sys.stdin) if m['name'] == '$name'), None)
+print(m['y'] + m['height'] // 2 if m else 0)")
+  hyprctl dispatch movecursor "$mx $my" >/dev/null
+
+  if [ "$BLANK_PHYSICAL" = "1" ]; then
+    physical_names | while read -r p; do hyprctl dispatch dpms off "$p" >/dev/null; done
+  fi
+  log "attached: $name @ $mode"
+}
+
+cmd_detach() {
+  local name first saved_ws saved_mon
+
+  name=$(headless_name)
+  [ "$BLANK_PHYSICAL" = "1" ] && hyprctl dispatch dpms on >/dev/null
+
+  # Put a migrated workspace back on the physical monitor.
+  if [ -f "$STATE_DIR/migrated" ]; then
+    saved_ws=$(sed -n 1p "$STATE_DIR/migrated")
+    saved_mon=$(sed -n 2p "$STATE_DIR/migrated")
+    if [ -n "$saved_ws" ] && [ -n "$saved_mon" ]; then
+      hyprctl dispatch moveworkspacetomonitor "$saved_ws $saved_mon" >/dev/null
+      log "returned workspace $saved_ws to $saved_mon"
+    fi
+    rm -f "$STATE_DIR/migrated"
+  fi
+
+  [ -n "$name" ] && set_mode "$name" "$VD_DEFAULT_MODE"
+
+  first=${saved_mon:-$(physical_names | head -1)}
+  if [ -n "$first" ]; then
+    hyprctl dispatch focusmonitor "$first" >/dev/null
+    [ -n "$saved_ws" ] && hyprctl dispatch workspace "$saved_ws" >/dev/null
+  fi
+  [ -n "$name" ] && reclaim_strays "$name"
+  log "detached; headless reset to $VD_DEFAULT_MODE"
+}
+
+cmd_off() {
+  local name
+  name=$(headless_name)
+  [ -z "$name" ] && { log "no headless output"; return 0; }
+  reclaim_strays "$name"
+  hyprctl output remove "$name" >/dev/null
+  sleep 0.3
+  prune_stale_monitor_cfgs
+  log "removed $name -- Sunshine will capture the physical screen until you re-init and restart it"
+}
+
+cmd_status() {
+  echo "headless output : $(headless_name)"
+  echo "physical        : $(physical_names | tr '\n' ' ')"
+  echo "sunshine cfg    : $(grep -E '^output_name' "$SUNSHINE_CONF" 2>/dev/null || echo '(unset)')"
+  VD_MONS="$(hyprctl monitors all -j)" python3 -c '
+import os, json
+for m in json.loads(os.environ["VD_MONS"]):
+    res = "{}x{}@{}".format(m["width"], m["height"], round(m["refreshRate"], 1))
+    print("  {:<12} {:<18} at {},{}  ws={}".format(
+        m["name"], res, m["x"], m["y"], m["activeWorkspace"]["name"]))'
+}
+
+case "${1:-}" in
+  init)   cmd_init ;;
+  off)    cmd_off ;;
+  attach) cmd_attach ;;
+  detach) cmd_detach ;;
+  status) cmd_status ;;
+  *) echo "usage: $(basename "$0") {init|off|attach|detach|status}" >&2; exit 2 ;;
+esac

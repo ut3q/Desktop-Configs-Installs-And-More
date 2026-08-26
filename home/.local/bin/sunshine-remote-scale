@@ -1,0 +1,165 @@
+#!/usr/bin/env bash
+# sunshine-remote-scale — enlarge the desktop UI while streaming.
+#
+# Sunshine captures the physical monitor, so on a phone or handheld everything
+# is rendered at 1920x1080 and the controls are tiny. This bumps Hyprland's
+# monitor scale on client connect and restores it on disconnect, so buttons,
+# tab switchers and menus come out proportionally bigger in the stream.
+#
+#   on      called by Sunshine on client connect
+#   off     called by Sunshine on client disconnect
+#   status  show current vs saved scale
+#
+# NOTE: `hyprctl keyword` and `hyprctl dispatch` are both no-ops under this
+# machine's Lua config parser (they even exit 0). Everything here goes through
+# `hyprctl eval` + hl.monitor, and every change is read back to confirm it
+# actually applied.
+
+set -uo pipefail
+
+# ---- tunables ---------------------------------------------------------------
+# Must divide the monitor's pixel size into whole logical pixels, or Hyprland
+# rejects it. For 1920x1080 the usable values are 1.2, 1.25, 1.5, 1.6, 2.0.
+#   1.25 -> 1536x864 (subtle)     1.5 -> 1280x720 (good on a phone)
+#   1.6  -> 1200x675              2.0 -> 960x540  (very large)
+REMOTE_SCALE=1.5
+TARGET_MONITOR=""      # empty = first physical monitor
+# -----------------------------------------------------------------------------
+
+STATE_DIR="${XDG_RUNTIME_DIR:-/tmp}/sunshine-remote-scale"
+MPV_OSC_CONF="${HOME}/.config/mpv/script-opts/osc.conf"
+
+log() { printf '[remote-scale] %s\n' "$*" >&2; }
+
+if [ -z "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
+  hypr_dir="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hypr"
+  if [ -d "$hypr_dir" ]; then
+    sig=$(find "$hypr_dir" -maxdepth 1 -mindepth 1 -type d -printf '%T@ %f\n' 2>/dev/null \
+          | sort -rn | head -1 | cut -d' ' -f2)
+    [ -n "$sig" ] && export HYPRLAND_INSTANCE_SIGNATURE="$sig"
+  fi
+fi
+
+hyprctl version >/dev/null 2>&1 || { log "cannot reach Hyprland"; exit 1; }
+
+monitor_json() {  # $1=name -> that monitor's json, or the first physical one
+  MON_NAME="${1:-}" hyprctl monitors -j | python3 -c '
+import os, sys, json
+want = os.environ.get("MON_NAME", "")
+ms = [m for m in json.load(sys.stdin) if not m["name"].startswith("HEADLESS-")]
+m = next((x for x in ms if x["name"] == want), None) if want else (ms[0] if ms else None)
+print(json.dumps(m) if m else "")'
+}
+
+field() {  # $1=json $2=key
+  MON_JSON="$1" MON_KEY="$2" python3 -c '
+import os, json
+j = os.environ["MON_JSON"]
+print(json.loads(j)[os.environ["MON_KEY"]] if j else "")'
+}
+
+apply_scale() {  # $1=name $2=mode $3=scale
+  hyprctl eval "hl.monitor({output=\"$1\", mode=\"$2\", scale=$3})" >/dev/null
+  local i got
+  for i in $(seq 15); do
+    got=$(field "$(monitor_json "$1")" scale)
+    # hyprctl reports scale rounded; compare loosely
+    if python3 -c "import sys; sys.exit(0 if abs(float('$got')-float('$3'))<0.02 else 1)" 2>/dev/null; then
+      return 0
+    fi
+    sleep 0.2
+  done
+  log "WARNING: $1 scale is '$got', wanted '$3' (does it divide into whole logical pixels?)"
+  return 1
+}
+
+# mpv's on-screen controller scales by WINDOW size, not by compositor scale.
+# When the desktop goes to 1.5x, mpv's logical window shrinks and the OSC ends
+# up the same physical size while every other app's controls grew -- so the
+# playback bar looks tiny by comparison. Bump the OSC by the same factor.
+#
+# script-opts are read at mpv startup, so this affects players launched during
+# the stream. An mpv already open keeps its current OSC size.
+mpv_osc_apply() {  # $1=scale
+  mkdir -p "$(dirname "$MPV_OSC_CONF")"
+  if [ -f "$MPV_OSC_CONF" ] && [ ! -f "$STATE_DIR/osc.orig" ]; then
+    cp -a "$MPV_OSC_CONF" "$STATE_DIR/osc.orig"
+  fi
+  cat > "$MPV_OSC_CONF" <<EOF
+# Written by sunshine-remote-scale while streaming. Restored on disconnect.
+scalewindowed=$1
+scalefullscreen=$1
+EOF
+}
+
+mpv_osc_restore() {
+  if [ -f "$STATE_DIR/osc.orig" ]; then
+    mv -f "$STATE_DIR/osc.orig" "$MPV_OSC_CONF"
+  else
+    rm -f "$MPV_OSC_CONF"
+  fi
+}
+
+cmd_on() {
+  local j name mode w h rr cur
+  j=$(monitor_json "$TARGET_MONITOR")
+  [ -z "$j" ] && { log "no physical monitor found"; exit 1; }
+  name=$(field "$j" name); w=$(field "$j" width); h=$(field "$j" height)
+  rr=$(printf '%.0f' "$(field "$j" refreshRate)"); cur=$(field "$j" scale)
+  mode="${w}x${h}@${rr}"
+
+  # Refuse a scale that would give fractional logical pixels.
+  if ! python3 -c "
+import sys
+lw, lh = $w/$REMOTE_SCALE, $h/$REMOTE_SCALE
+sys.exit(0 if abs(lw-round(lw))<0.01 and abs(lh-round(lh))<0.01 else 1)"; then
+    log "scale $REMOTE_SCALE does not divide ${w}x${h} into whole logical pixels; not applying"
+    exit 1
+  fi
+
+  mkdir -p "$STATE_DIR"
+  if [ -f "$STATE_DIR/saved" ]; then
+    # Already scaled. Do NOT re-save, or the scaled value becomes the
+    # "original" and the desktop never returns to normal.
+    log "already scaled (saved scale $(sed -n 2p "$STATE_DIR/saved")); nothing to do"
+    return 0
+  fi
+  printf '%s\n%s\n%s\n' "$name" "$cur" "$mode" > "$STATE_DIR/saved"
+  mpv_osc_apply "$REMOTE_SCALE"
+  apply_scale "$name" "$mode" "$REMOTE_SCALE" \
+    && log "$name scaled $cur -> $REMOTE_SCALE (logical $(python3 -c "print(f'{round($w/$REMOTE_SCALE)}x{round($h/$REMOTE_SCALE)}')"))"
+}
+
+cmd_off() {
+  local name old mode
+  if [ ! -f "$STATE_DIR/saved" ]; then
+    log "nothing saved; leaving scale alone"
+    return 0
+  fi
+  name=$(sed -n 1p "$STATE_DIR/saved")
+  old=$(sed -n 2p "$STATE_DIR/saved")
+  mode=$(sed -n 3p "$STATE_DIR/saved")
+  apply_scale "$name" "$mode" "$old" && log "$name scale restored to $old"
+  mpv_osc_restore
+  rm -f "$STATE_DIR/saved"
+}
+
+cmd_status() {
+  local j
+  j=$(monitor_json "$TARGET_MONITOR")
+  echo "monitor      : $(field "$j" name)"
+  echo "scale now    : $(field "$j" scale)"
+  echo "remote scale : $REMOTE_SCALE"
+  if [ -f "$STATE_DIR/saved" ]; then
+    echo "saved (streaming active): $(sed -n 2p "$STATE_DIR/saved")"
+  else
+    echo "saved        : none (not streaming)"
+  fi
+}
+
+case "${1:-}" in
+  on)     cmd_on ;;
+  off)    cmd_off ;;
+  status) cmd_status ;;
+  *) echo "usage: $(basename "$0") {on|off|status}" >&2; exit 2 ;;
+esac

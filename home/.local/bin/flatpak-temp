@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+# flatpak-temp -- install a Flathub app, run it, and remove it when it closes.
+#
+# For apps you need once a month and do not want squatting on disk.
+# Shared runtimes you already have are reused, never removed. An app you
+# installed permanently is never touched.
+#
+#   flatpak-temp org.gimp.GIMP              run it, remove it on exit
+#   flatpak-temp gimp                       search if the id is not exact
+#   flatpak-temp org.gimp.GIMP --purge      also delete ~/.var/app data
+#   flatpak-temp org.gimp.GIMP -- --version pass args to the app after --
+#   flatpak-temp --dry-run org.gimp.GIMP    show the plan, change nothing
+set -uo pipefail
+
+PURGE=0; DRY=0; APP=""; declare -a ARGS=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --purge)   PURGE=1 ;;
+    --dry-run) DRY=1 ;;
+    -h|--help) sed -n '2,13p' "$0" | sed 's/^# \?//'; exit 0 ;;
+    --)        shift; ARGS=("$@"); break ;;
+    -*)        echo "unknown flag: $1" >&2; exit 1 ;;
+    *)         [ -z "$APP" ] && APP="$1" || ARGS+=("$1") ;;
+  esac; shift
+done
+[ -n "$APP" ] || { echo "usage: flatpak-temp <app-id> [--purge] [-- args]" >&2; exit 1; }
+
+c_ok=$'\e[32m'; c_warn=$'\e[33m'; c_err=$'\e[31m'; c_dim=$'\e[2m'; c_off=$'\e[0m'
+info() { printf '%s==>%s %s\n' $'\e[1;34m' "$c_off" "$*"; }
+ok()   { printf '%s  ok%s %s\n' "$c_ok" "$c_off" "$*"; }
+warn() { printf '%swarn%s %s\n' "$c_warn" "$c_off" "$*"; }
+err()  { printf '%s err%s %s\n' "$c_err" "$c_off" "$*" >&2; }
+
+command -v flatpak >/dev/null || { err "flatpak not installed"; exit 1; }
+
+# Once flathub exists in BOTH scopes the bare name is ambiguous and flatpak goes
+# interactive, so every lookup must name its scope explicitly.
+remote_info() {
+  flatpak remote-info --user   flathub "$1" 2>/dev/null && return 0
+  flatpak remote-info --system flathub "$1" 2>/dev/null && return 0
+  return 1
+}
+
+# --- never touch an app that is permanently installed ----------------------
+if flatpak info "$APP" >/dev/null 2>&1; then
+  scope=$(flatpak info "$APP" 2>/dev/null | awk -F': *' '/Installation:/{print $2}')
+  warn "$APP is already installed permanently (${scope:-unknown})."
+  warn "flatpak-temp will NOT remove an app you chose to keep."
+  if [ "$DRY" = 1 ]; then
+    printf '%s  would: flatpak run %s %s   (and nothing else)%s\n' "$c_dim" "$APP" "${ARGS[*]-}" "$c_off"; exit 0
+  fi
+  warn "running it as-is."
+  exec flatpak run "$APP" ${ARGS+"${ARGS[@]}"}
+fi
+
+# --- resolve the id against the system remote ------------------------------
+if ! remote_info "$APP" >/dev/null 2>&1; then
+  warn "'$APP' is not an exact Flathub app id. Closest matches:"
+  flatpak search "$APP" --columns=application,name 2>/dev/null | head -12
+  echo; err "re-run with the exact Application ID from the first column"
+  exit 1
+fi
+size=$(remote_info "$APP" | awk -F': *' '/Download Size:/{print $2}')
+info "$APP  (download: ${size:-unknown})"
+
+if [ "$DRY" = 1 ]; then
+  printf '%s  would: flatpak install --user -y flathub %s%s\n'  "$c_dim" "$APP" "$c_off"
+  printf '%s  would: flatpak run --user %s %s%s\n'              "$c_dim" "$APP" "${ARGS[*]-}" "$c_off"
+  printf '%s  would: flatpak uninstall --user -y %s%s\n'        "$c_dim" "$APP" "$c_off"
+  printf '%s  would: flatpak uninstall --user --unused -y%s\n'  "$c_dim" "$c_off"
+  [ "$PURGE" = 1 ] && printf '%s  would: rm -rf ~/.var/app/%s%s\n' "$c_dim" "$APP" "$c_off"
+  exit 0
+fi
+
+# --- remotes are per-installation; --user needs its own flathub entry ------
+if ! flatpak remotes --user --columns=name 2>/dev/null | grep -qx flathub; then
+  # Must be the .flatpakrepo file, not the bare repo URL -- the bare URL carries
+  # no GPG key, so every later pull fails with "public key not found".
+  info "adding flathub to the user scope (one time)"
+  flatpak remote-add --user --if-not-exists \
+    flathub https://dl.flathub.org/repo/flathub.flatpakrepo \
+    || { err "could not add the user flathub remote"; exit 1; }
+fi
+
+INSTALLED=0
+cleanup() {
+  local rc=$?
+  trap - EXIT INT TERM
+  [ "$INSTALLED" = 1 ] || exit $rc          # never installed: nothing to undo
+  echo; info "cleaning up $APP"
+  flatpak uninstall --user -y "$APP" >/dev/null 2>&1 \
+    && ok "removed $APP" \
+    || warn "could not remove $APP -- run: flatpak uninstall --user $APP"
+  # only removes runtimes nothing else needs; shared system platforms are safe
+  local freed
+  freed=$(flatpak uninstall --user --unused -y 2>&1 | grep -ci 'uninstalling' || true)
+  [ "${freed:-0}" -gt 0 ] && ok "reclaimed $freed orphaned runtime(s)"
+  if [ "$PURGE" = 1 ] && [ -d "$HOME/.var/app/$APP" ]; then
+    rm -rf "$HOME/.var/app/$APP" && ok "purged ~/.var/app/$APP"
+  elif [ -d "$HOME/.var/app/$APP" ]; then
+    printf '%s      kept ~/.var/app/%s (%s) -- settings survive; --purge to delete%s\n' \
+      "$c_dim" "$APP" "$(du -sh "$HOME/.var/app/$APP" 2>/dev/null | cut -f1)" "$c_off"
+  fi
+  exit $rc
+}
+trap cleanup EXIT INT TERM
+
+info "installing to the user scope (no sudo, system install untouched)"
+flatpak install --user -y flathub "$APP" || { err "install failed"; exit 1; }
+INSTALLED=1
+
+info "running -- close the app to trigger cleanup"
+flatpak run --user "$APP" ${ARGS+"${ARGS[@]}"}

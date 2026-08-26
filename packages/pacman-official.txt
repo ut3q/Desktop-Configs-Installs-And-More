@@ -6,7 +6,6 @@ base
 base-devel
 bat
 bind
-blueman
 bluez
 bluez-utils
 btop
@@ -15,7 +14,6 @@ calf
 ccache
 chafa
 clinfo
-cliphist
 cmake
 cosmic-store
 cpptrace
@@ -30,7 +28,6 @@ fd
 fish
 flatpak
 foot
-frameworkintegration
 fuse2
 fzf
 gamemode
@@ -51,6 +48,7 @@ inotify-tools
 jq
 kdeconnect
 kvantum
+kvantum-qt5
 lazygit
 lib32-gamemode
 lib32-mangohud
@@ -63,8 +61,7 @@ limine
 linux
 linux-firmware
 linux-zen
-lite-xl
-lsp-plugins
+lsp-plugins-lv2
 make
 mangohud
 mpv
@@ -88,7 +85,6 @@ pipewire-pulse
 prismlauncher
 ripgrep
 rtkit
-scx-scheds
 sddm
 sof-firmware
 sshfs
@@ -117,12 +113,10 @@ wireplumber
 wl-clip-persist
 wl-clipboard
 wpa_supplicant
-wpewebkit
 xdg-desktop-portal-gtk
 xdg-desktop-portal-hyprland
 xdg-user-dirs
 xorg-server
-xorg-xinit
 ydotool
 yt-dlp
 zip

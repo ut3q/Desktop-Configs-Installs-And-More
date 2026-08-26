@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=KDE Connect Browse Handler
+Exec=/home/aqua/.local/bin/kdeconnect-open %u
+NoDisplay=true
+MimeType=x-scheme-handler/kdeconnect;

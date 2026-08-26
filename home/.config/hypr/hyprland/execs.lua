@@ -4,7 +4,14 @@ local fn = require("hyprland.functions")
 hl.on("hyprland.start", function()
 	-- Keyring and auth
 	hl.exec_cmd("gnome-keyring-daemon --start --components=secrets")
-	hl.exec_cmd("/usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1")
+	-- hyprpolkitagent.service ships WantedBy=graphical-session.target, but that
+	-- target is never activated here: Hyprland is launched from hyprland.desktop
+	-- (not hyprland-uwsm.desktop) and nothing binds a session unit to it, so the
+	-- enable symlink never fired and polkit-gnome won the polkitd registration.
+	-- Import the env first so the unit's ConditionEnvironment=WAYLAND_DISPLAY is
+	-- satisfied regardless of how far Hyprland's own import has got. Idempotent:
+	-- a no-op if D-Bus activation already brought the agent up.
+	hl.exec_cmd("systemctl --user import-environment WAYLAND_DISPLAY HYPRLAND_INSTANCE_SIGNATURE XDG_CURRENT_DESKTOP && systemctl --user restart hyprpolkitagent.service")
 
 	-- Keep clipboard contents after the source app closes (no history stored)
 	hl.exec_cmd("wl-clip-persist --clipboard regular")

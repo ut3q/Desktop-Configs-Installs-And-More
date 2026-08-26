@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# caelestia-upgrade-watch — tell me when the shell's native side moves under the fork.
+#
+# The shell QML is forked to ~/.config/quickshell/caelestia and pinned to a
+# caelestia-shell version. The COMPILED plugins it imports (Caelestia.Config,
+# .Services, .Internal, .Models, .Blobs, .Components, M3Shapes) and the
+# quickshell binary itself are packages. Upgrading them moves the API out from
+# under the pinned QML.
+#
+# Note these are AUR/foreign packages: plain `pacman -Syu` does NOT upgrade them.
+# It takes `paru -Syu` or `caelestia update` (which runs paru -Syu first).
+#
+# On a change: notify, and toast in the shell if it is running. Then:
+#   ~/.config/quickshell/caelestia/sync-upstream.sh
+#   git -C ~/.config/quickshell/caelestia merge upstream/main
+#   qs -c caelestia kill; sleep .1; caelestia shell -d
+
+set -uo pipefail
+
+STAMP="${XDG_STATE_HOME:-$HOME/.local/state}/caelestia-fork/packages"
+mkdir -p "$(dirname "$STAMP")"
+
+# `pacman -Q quickshell` resolves the provides and prints quickshell-git.
+now=$(pacman -Q caelestia-shell caelestia-cli quickshell 2>/dev/null) || exit 0
+old=$(cat "$STAMP" 2>/dev/null || true)
+
+if [ -z "$old" ]; then
+  printf '%s\n' "$now" > "$STAMP"          # first run: seed quietly
+  exit 0
+fi
+[ "$now" = "$old" ] && exit 0
+
+body="Shell packages changed. Re-merge ~/.config/quickshell/caelestia before restarting the shell."
+notify-send -a caelestia-fork -u critical -i system-software-update \
+  "Caelestia packages upgraded" "$body" 2>/dev/null || true
+# Toast.Warning deliberately: Toasts.qml suppresses lower levels under fullscreen.
+caelestia shell toaster warn "Caelestia packages upgraded" "$body" system_update 2>/dev/null || true
+
+{ echo "=== $(date -Iseconds) ==="; echo "was:"; echo "$old"; echo "now:"; echo "$now"; } \
+  >> "$(dirname "$STAMP")/history.log"
+printf '%s\n' "$now" > "$STAMP"

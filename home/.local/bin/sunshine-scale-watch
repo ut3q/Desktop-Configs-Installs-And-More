@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# sunshine-scale-watch — drives desktop scaling and idle inhibition from
+# Sunshine's own client events.
+#
+# Why a watcher instead of global_prep_cmd: Sunshine's prep `undo` only runs
+# when the APP terminates. Swiping the client away logs "CLIENT DISCONNECTED"
+# but keeps the session alive for reconnect ("streaming paused"), so the undo
+# never fires and the desktop stays scaled. The log catches both cases.
+#
+# Idle inhibition is held for the whole lifetime of this process, which is
+# bound to Sunshine's, so the screen cannot blank itself while Sunshine runs.
+
+set -uo pipefail
+
+UNIT="app-dev.lizardbyte.app.Sunshine.service"
+SCALE_BIN="${HOME}/.local/bin/sunshine-remote-scale"
+VSESSION_BIN="${HOME}/.local/bin/sunshine-virtual-session"
+MODE_FILE="${HOME}/.config/sunshine/mode"
+# A swipe-away logs CLIENT DISCONNECTED but the session stays alive. Don't tear
+# the virtual layout down instantly, or coming back lands on a bare screen.
+LEAVE_GRACE_SECS=60
+HEARTBEAT_SECS=60
+
+[ -x "$SCALE_BIN" ] || { echo "missing $SCALE_BIN" >&2; exit 1; }
+
+log() { printf '[scale-watch] %s\n' "$*"; }
+
+inhibit_on()  { qs -c caelestia ipc call idleInhibitor enable  >/dev/null 2>&1; }
+inhibit_off() { qs -c caelestia ipc call idleInhibitor disable >/dev/null 2>&1; }
+inhibit_is()  { qs -c caelestia ipc call idleInhibitor isEnabled 2>/dev/null | tr -d '[:space:]'; }
+
+# Re-assert if the shell restarted and dropped the inhibitor.
+ensure_inhibit() { [ "$(inhibit_is)" = "true" ] || inhibit_on; }
+
+cancel_leave() {
+  if [ -n "${LEAVE_PID:-}" ] && kill -0 "$LEAVE_PID" 2>/dev/null; then
+    kill "$LEAVE_PID" 2>/dev/null
+    log "cancelled pending restore (client came back)"
+  fi
+  LEAVE_PID=""
+}
+
+cleanup() {
+  [ -n "${HEARTBEAT_PID:-}" ] && kill "$HEARTBEAT_PID" 2>/dev/null
+  [ -n "${LEAVE_PID:-}" ] && kill "$LEAVE_PID" 2>/dev/null
+  # Restoring the physical monitor comes FIRST. Being left without a display is
+  # the only unacceptable outcome here.
+  "$VSESSION_BIN" leave >/dev/null 2>&1
+  "$SCALE_BIN" off >/dev/null 2>&1
+  inhibit_off
+  log "restored monitor, scale and idle inhibitor"
+}
+trap cleanup EXIT INT TERM
+
+# Never inherit a stale scale from a previous session.
+"$SCALE_BIN" off >/dev/null 2>&1
+inhibit_on
+log "idle inhibitor held for the lifetime of $UNIT"
+
+# If Sunshine dies outright, nothing else will re-enable the monitor.
+( while sleep "$HEARTBEAT_SECS"; do
+    ensure_inhibit
+    systemctl --user is-active "$UNIT" >/dev/null 2>&1 || "$VSESSION_BIN" leave >/dev/null 2>&1
+  done ) &
+HEARTBEAT_PID=$!
+
+journalctl --user -u "$UNIT" -f -n0 -o cat 2>/dev/null | while IFS= read -r line; do
+  case "$line" in
+    *"CLIENT CONNECTED"*)
+      cancel_leave
+      ensure_inhibit
+      "$VSESSION_BIN" enter >/dev/null 2>&1
+      "$SCALE_BIN" on >/dev/null 2>&1
+      log "client connected -> scaled up (mode: $(cat "$MODE_FILE" 2>/dev/null || echo mirror))"
+      ;;
+    *"CLIENT DISCONNECTED"*)
+      "$SCALE_BIN" off >/dev/null 2>&1
+      cancel_leave
+      ( sleep "$LEAVE_GRACE_SECS"; "$VSESSION_BIN" leave >/dev/null 2>&1 ) &
+      LEAVE_PID=$!
+      log "client disconnected -> scale restored, monitor restore in ${LEAVE_GRACE_SECS}s"
+      ;;
+  esac
+done

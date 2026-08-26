@@ -1,0 +1,172 @@
+#!/usr/bin/env bash
+# osu-server-picker — pick a server, restore that server's login, then hand off to osu-wine.
+#
+# Servers live in ~/.config/osu-servers.conf as "Display Name|devserver-host".
+# An empty host means official Bancho (no -devserver flag).
+#
+# osu! stable keeps exactly one login in osu!.<user>.cfg, so hopping servers
+# clobbers the previous one. This script parks each server's login block in
+# ~/.local/share/osu-server-creds/<slug> and swaps the right one back in before
+# launching. osu! still writes its own credentials — nothing is stored here that
+# osu! did not already put on disk.
+
+set -uo pipefail
+
+CONF="${XDG_CONFIG_HOME:-$HOME/.config}/osu-servers.conf"
+LAST="${XDG_CACHE_HOME:-$HOME/.cache}/osu-server-last"
+LASTSLUG="${XDG_CACHE_HOME:-$HOME/.cache}/osu-server-last-slug"
+CREDDIR="${XDG_DATA_HOME:-$HOME/.local/share}/osu-server-creds"
+OSU_WINE="$HOME/.local/bin/osu-wine"
+
+# The credential keys osu! writes into its config.
+CRED_KEYS="CredentialEndpoint Username Password SaveUsername SavePassword"
+
+# ---------------------------------------------------------------- credentials
+
+# Locate the active osu!.<user>.cfg (osu!.cfg is a different, credential-free file).
+find_cfg() {
+    local osupath
+    osupath=$(cat "${XDG_DATA_HOME:-$HOME/.local/share}/osuconfig/osupath" 2>/dev/null)
+    [ -d "$osupath" ] || return 1
+    local f
+    for f in "$osupath"/osu!.*.cfg; do
+        [ -f "$f" ] && [ "$(basename "$f")" != "osu!.cfg" ] && { printf '%s' "$f"; return 0; }
+    done
+    return 1
+}
+
+slugify() {
+    local s="${1:-bancho}"
+    s=$(printf '%s' "$s" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9._-' '_')
+    printf '%s' "${s:-bancho}"
+}
+
+# Pull the credential keys out of the cfg into a store file.
+harvest() {
+    local file=$1 out=$2
+    [ -r "$file" ] || return 0
+    ( umask 077
+      awk -v keys="$CRED_KEYS" '
+        BEGIN { n = split(keys, a, " "); for (i = 1; i <= n; i++) want[a[i]] = 1 }
+        {
+            line = $0; sub(/\r$/, "", line)
+            p = index(line, " = ")
+            if (p > 0) {
+                k = substr(line, 1, p - 1)
+                if (k in want) print k "=" substr(line, p + 3)
+            }
+        }
+      ' "$file" > "$out.new" && mv "$out.new" "$out" )
+}
+
+# Write a store file's keys back into the cfg, preserving its CRLF line endings.
+apply() {
+    local file=$1 store=$2
+    [ -r "$file" ] && [ -r "$store" ] || return 0
+    OSU_STORE="$store" awk '
+        BEGIN {
+            s = ENVIRON["OSU_STORE"]
+            while ((getline l < s) > 0) {
+                sub(/\r$/, "", l)
+                p = index(l, "=")
+                if (p > 1) kv[substr(l, 1, p - 1)] = substr(l, p + 1)
+            }
+            close(s)
+        }
+        {
+            line = $0; sub(/\r$/, "", line)
+            p = index(line, " = ")
+            if (p > 0) {
+                k = substr(line, 1, p - 1)
+                if (k in kv) { print k " = " kv[k] "\r"; next }
+            }
+            print line "\r"
+        }
+    ' "$file" > "$file.swap" && mv "$file.swap" "$file"
+}
+
+# --------------------------------------------------------------- server list
+
+if [ ! -f "$CONF" ]; then
+    mkdir -p "$(dirname "$CONF")"
+    cat > "$CONF" <<'EOF'
+# osu! servers — one per line, as: Display Name|devserver-host
+# Leave the host empty for the official server (Bancho).
+# Lines starting with # are ignored.
+osu! (Bancho)|
+mamesosu|mamesosu.net
+Akatsuki|akatsuki.gg
+Ripple|ripple.moe
+Gatari|osu.gatari.pw
+EOF
+fi
+
+mapfile -t ENTRIES < <(grep -vE '^\s*(#|$)' "$CONF")
+[ "${#ENTRIES[@]}" -eq 0 ] && { notify-send -u critical "osu!" "No servers in $CONF"; exit 1; }
+
+# Float the most recently used entry to the top.
+if [ -r "$LAST" ]; then
+    prev=$(<"$LAST")
+    for i in "${!ENTRIES[@]}"; do
+        if [ "${ENTRIES[$i]%%|*}" = "$prev" ]; then
+            ENTRIES=("${ENTRIES[$i]}" "${ENTRIES[@]:0:$i}" "${ENTRIES[@]:$((i+1))}")
+            break
+        fi
+    done
+fi
+
+names=$(printf '%s\n' "${ENTRIES[@]}" | cut -d'|' -f1)
+
+if command -v fuzzel >/dev/null 2>&1; then
+    pkill fuzzel 2>/dev/null
+    choice=$(printf '%s\n' "$names" | fuzzel --dmenu --prompt='osu! server: ' --lines=8)
+else
+    choice=$(printf '%s\n' "$names" | head -1)   # no picker available: use the top entry
+fi
+
+[ -z "${choice:-}" ] && exit 0   # dismissed
+
+host=""
+for e in "${ENTRIES[@]}"; do
+    if [ "${e%%|*}" = "$choice" ]; then host="${e#*|}"; break; fi
+done
+
+printf '%s' "$choice" > "$LAST"
+
+# ------------------------------------------------------------- login swapping
+
+mkdir -p "$CREDDIR" && chmod 700 "$CREDDIR"
+
+CFG=$(find_cfg) || CFG=""
+slug=$(slugify "$host")
+prev_slug=$(cat "$LASTSLUG" 2>/dev/null)
+
+if [ -n "$CFG" ]; then
+    # The login sitting in the cfg right now belongs to whoever played last.
+    [ -n "${prev_slug:-}" ] && harvest "$CFG" "$CREDDIR/$prev_slug"
+
+    if [ -f "$CREDDIR/$slug" ]; then
+        apply "$CFG" "$CREDDIR/$slug"
+    else
+        # Never played here — clear the other server's login so osu! prompts fresh.
+        ( umask 077; printf 'Username=\nPassword=\nSaveUsername=1\nSavePassword=1\n' > "$CREDDIR/.seed" )
+        apply "$CFG" "$CREDDIR/.seed"
+        rm -f "$CREDDIR/.seed"
+    fi
+
+    # Save this server's login on the way out, however we exit.
+    trap 'harvest "$CFG" "$CREDDIR/$slug"' EXIT
+fi
+
+printf '%s' "$slug" > "$LASTSLUG"
+
+if [ -n "$host" ]; then
+    "$OSU_WINE" --devserver "$host" "$@"
+else
+    "$OSU_WINE" "$@"
+fi
+rc=$?
+
+# osu! flushes its config as it shuts down; give it a moment before harvesting.
+sleep 2
+exit $rc

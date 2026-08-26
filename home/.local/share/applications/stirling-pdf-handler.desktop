@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Stirling-PDF
+Exec="/usr/bin/stirling-pdf" %u
+Terminal=false
+MimeType=x-scheme-handler/stirlingpdf
+NoDisplay=true
