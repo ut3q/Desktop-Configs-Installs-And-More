@@ -47,7 +47,9 @@ repo    .config/hypr                      # also bundle its git history
 
 | Directory | Contents |
 |---|---|
-| `home/` | 48 config trees — shell, Hyprland, Caelestia/quickshell, terminals, editors, GTK/Qt theming, OBS, OpenTabletDriver, mpv, yt tooling |
+| `home/` | 53 config trees — shell, Hyprland, Caelestia/quickshell, terminals, editors, GTK/Qt theming, OBS, OpenTabletDriver, mpv, yt tooling |
+| `home/.local/bin` | 13 hand-written scripts (`sunshine-vdisplay`, `osu-server-picker`, `caelestia-upgrade-watch`, `flatpak-temp`, ...) |
+| `home/.local/share/applications` | 20 custom `.desktop` launchers |
 | `system/` | `/usr/local/bin` scripts (`backup-mirror`, `arch-cleaner`, `discord-updater`) and the `backup-mirror` systemd unit + excludes |
 | `packages/` | 130 official + 22 AUR + 8 flatpak, plus the enabled-unit lists |
 | `repos/` | `git bundle` archives — full commit history for repos that exist nowhere else |
@@ -65,12 +67,32 @@ Inspect one by hand with:
 git clone repos/config-hypr.bundle /tmp/hypr && git -C /tmp/hypr log
 ```
 
+## flatpak-temp
+
+`.local/bin/flatpak-temp` runs a Flathub app without keeping it:
+
+```bash
+flatpak-temp org.gimp.GIMP           # install, run, remove on exit
+flatpak-temp org.gimp.GIMP --purge   # also delete ~/.var/app data
+flatpak-temp gimp                    # search when the id is not exact
+flatpak-temp --dry-run org.gimp.GIMP
+```
+
+Runtimes you already have are reused, so a typical app is a few MB rather than
+a gigabyte. Only genuinely orphaned runtimes are reclaimed, and an app you
+installed permanently is detected and never removed.
+
+Note: it installs to the **user** scope, which needs its own `flathub` remote.
+The script adds it once, using the `.flatpakrepo` URL — a bare repo URL carries
+no GPG key and every pull then fails with "public key not found".
+
 ## Deliberately excluded
 
 - **Cookie jars and any `*cookies*` file** — live logged-in sessions. Never commit these.
 - Build artifacts: `Vencord/dist`, `equicord.asar`, `quickshell/caelestia/build`
 - `.bak` sprawl, `__pycache__`, caches, logs, sockets, pid files
 - Games (~549G), browser profiles, Steam, `.local/share/osu`
+- `.local/bin/jan` — a 9MB downloaded binary, not a script
 - `/etc/fstab` — captured to `docs/` for reference only. **UUIDs are machine-specific;
   copying it blindly onto new hardware will produce an unbootable system.**
 
