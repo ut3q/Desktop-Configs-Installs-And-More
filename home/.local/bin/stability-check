@@ -1,29 +1,119 @@
 #!/usr/bin/env bash
 # stability-check -- after a BIOS/tuning change, did the machine log any
-# hardware distress? Run it after a session of real load.
+# hardware distress?
 #   stability-check          this boot
-#   stability-check -a       last 14 days, all boots
+#   stability-check -a [N]   last N days (default 30), including journals
+#                            preserved in /mnt/backup/snapshots
+#
+# NOTE ON PATTERNS: the kernel does NOT print "machine check exception" for
+# AMD fatal MCEs. It prints "[Hardware Error]: ..." plus a decoded MCi_STATUS
+# line, and the *following* boot reports "Previous system reset reason".
+# An earlier version of this script grepped for the wrong strings and
+# reported clean while 7 fatal MCEs sat in the log. Match on what the
+# kernel actually emits, and exclude the informational lines by name.
 set -uo pipefail
-SINCE="-b"; LABEL="this boot"
-[ "${1:-}" = "-a" ] && { SINCE='--since=14 days ago'; LABEL="last 14 days"; }
-g=$'\e[32m'; r=$'\e[31m'; y=$'\e[33m'; o=$'\e[0m'
+
+DAYS=30; ALLBOOTS=0
+if [ "${1:-}" = "-a" ]; then ALLBOOTS=1; [ -n "${2:-}" ] && DAYS="$2"; fi
+
+g=$'\e[32m'; r=$'\e[31m'; y=$'\e[33m'; b=$'\e[1m'; o=$'\e[0m'
+LOG=$(mktemp); trap 'rm -f "$LOG"' EXIT
+
+if [ "$ALLBOOTS" = 1 ]; then
+  LABEL="last $DAYS days, all reachable journals"
+  mapfile -t JF < <(find /var/log/journal /mnt/backup/snapshots/*/var/log/journal \
+                      -name 'system*.journal*' 2>/dev/null \
+                    | awk -F/ '{print $NF"\t"$0}' | sort -u -k1,1 | cut -f2)
+  ARGS=(); for f in "${JF[@]}"; do ARGS+=(--file="$f"); done
+  journalctl "${ARGS[@]}" --since="$DAYS days ago" --no-pager -o short-iso 2>/dev/null > "$LOG"
+  printf 'stability-check: %s  (%d journal files)\n' "$LABEL" "${#JF[@]}"
+else
+  LABEL="this boot"
+  journalctl -b --no-pager -o short-iso 2>/dev/null > "$LOG"
+  printf 'stability-check: %s  (up %s)\n' "$LABEL" "$(uptime -p 2>/dev/null | sed 's/^up //')"
+fi
+printf '  window: %s .. %s\n\n' \
+  "$(head -1 "$LOG" | cut -dT -f1)" "$(tail -1 "$LOG" | cut -dT -f1)"
+
 fail=0
-chk() { # name, pattern, hint
-  local n=$(journalctl -k $SINCE --no-pager 2>/dev/null | grep -icE "$2")
-  if [ "$n" -eq 0 ]; then printf '%s  ok %s %-28s 0\n' "$g" "$o" "$1"
-  else printf '%s FAIL%s %-28s %d   <- %s\n' "$r" "$o" "$1" "$n" "$3"; fail=1; fi
+chk() { # name, include-pattern, exclude-pattern (may be empty), hint
+  local n
+  if [ -n "$3" ]; then n=$(grep -iE "$2" "$LOG" | grep -civE "$3")
+  else n=$(grep -icE "$2" "$LOG"); fi
+  if [ "$n" -eq 0 ]; then printf '%s  ok %s %-26s 0\n' "$g" "$o" "$1"
+  else printf '%s FAIL%s %-26s %-4d <- %s\n' "$r" "$o" "$1" "$n" "$4"; fail=1; fi
 }
-echo "stability-check: $LABEL   (up $(uptime -p 2>/dev/null | sed 's/^up //'))"; echo
-chk "machine check / WHEA"  'machine check exception|mce:.*hardware error|whea' "back off CO / SoC voltage NOW"
-chk "kernel panic / oops"   'kernel panic|oops:|general protection fault'       "unstable core clock or RAM"
-chk "lockups"               'soft lockup|hard lockup|watchdog: bug'             "too aggressive all-core"
-chk "segfaults"             'segfault|trap invalid opcode'                      "RAM/FCLK unstable (or a bad app)"
-chk "amdgpu reset/timeout"  'amdgpu.*(reset|timeout|hang)|ring .* timeout'      "GPU undervolt too low"
-chk "EDAC memory errors"    'edac.*(error|corrected)|memory error'              "RAM instability"
-chk "thermal throttle"      'throttl|overheat|critical temp'                    "cooling / power limit"
+
+#   include                                exclude (informational lines)
+chk "fatal MCE / hardware err" \
+    '\[Hardware Error\]|MC[0-9]+_STATUS' \
+    'In-kernel MCE decoding' \
+    "back off Curve Optimizer NOW"
+chk "sync-flood hard reset" \
+    'uncorrected error caused a data fabric sync flood' \
+    '' \
+    "the box HARD RESET from an MCE"
+chk "kernel panic / oops" \
+    'kernel panic|Oops:|general protection fault|BUG: unable to handle' \
+    '' \
+    "unstable core clock or RAM"
+chk "lockups" \
+    'soft lockup|hard LOCKUP|watchdog: BUG|rcu.*detected stall' \
+    'NMI watchdog: Enabled' \
+    "too aggressive all-core"
+chk "segfaults" \
+    'segfault|trap invalid opcode' \
+    '' \
+    "RAM/FCLK unstable (or a bad app)"
+chk "amdgpu reset/timeout" \
+    'amdgpu.*(reset begin|hang)|ring [a-z0-9_]+ timeout|GPU reset' \
+    'containerd|dockerd|level=info' \
+    "GPU undervolt too low"
+chk "EDAC memory errors" \
+    'EDAC.*(error|CE |UE )|CE memory read error|[0-9]+ CE .*on mc' \
+    'EDAC MC: Ver:|EDAC amd64:.*DRAM ECC|data fabric sync flood' \
+    "RAM instability"
+chk "thermal throttle" \
+    'temperature above threshold|thermal throttl|critical temp|overheat' \
+    '' \
+    "cooling / power limit"
+chk "PCIe AER errors" \
+    'AER:.*(error|Corrected|Uncorrected)|severity=' \
+    'AER: enabled' \
+    "PCIe/riser or SoC voltage"
+
+# --- reset-reason history: the single most useful signal on AMD ---
+echo
+printf '%sreset reasons seen:%s\n' "$b" "$o"
+grep -oE 'Previous system reset reason \[0x[0-9a-f]+\]: .*' "$LOG" \
+  | sed 's/Previous system reset reason //' | sort | uniq -c | sort -rn \
+  | sed 's/^/  /' || echo "  (none logged)"
+
+# --- which cores? CO is per-core, so attribution matters ---
+if grep -q '\[Hardware Error\].*CPU:' "$LOG"; then
+  echo
+  printf '%sfaulting cores (CO is per-core -- raise these first):%s\n' "$b" "$o"
+  grep -oE 'CPU:[0-9]+ \([0-9a-f:]+\) MC[0-9]+_STATUS' "$LOG" \
+    | grep -oE 'CPU:[0-9]+|MC[0-9]+' | paste - - | sort | uniq -c | sort -rn \
+    | while read -r n cpu bank; do
+        id=${cpu#CPU:}
+        core=$(cat /sys/devices/system/cpu/cpu$id/topology/core_id 2>/dev/null)
+        sib=$(cat /sys/devices/system/cpu/cpu$id/topology/thread_siblings_list 2>/dev/null)
+        printf '  %2dx  %-8s bank=%-6s physical core %s (threads %s)\n' "$n" "$cpu" "$bank" "${core:-?}" "${sib:-?}"
+      done
+fi
+
+if grep -qE 'segfault.*likely on CPU' "$LOG"; then
+  echo
+  printf '%ssegfaults by core (cross-check against the list above):%s\n' "$b" "$o"
+  grep -oE 'segfault.*likely on CPU [0-9]+ \(core [0-9]+' "$LOG" \
+    | grep -oE 'core [0-9]+$' | sort | uniq -c | sed 's/^/  /'
+fi
+
 echo
 echo "current:"
-command -v sensors >/dev/null && sensors 2>/dev/null | grep -E 'Tctl|Tccd|junction|edge|PPT' | sed 's/^/  /'
+command -v sensors >/dev/null && sensors 2>/dev/null \
+  | grep -E 'Tctl|Tccd|junction|edge|PPT|vddgfx' | sed 's/^/  /'
 echo
 [ "$fail" -eq 0 ] && printf '%sclean -- no hardware distress logged%s\n' "$g" "$o" \
                   || printf '%sinvestigate before pushing further%s\n' "$r" "$o"
