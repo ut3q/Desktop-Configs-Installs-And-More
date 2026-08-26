@@ -24,10 +24,21 @@ hl.on("hyprland.start", function()
 	hl.exec_cmd("gsettings set org.gnome.desktop.interface cursor-theme " .. vars.cursorTheme)
 	hl.exec_cmd("gsettings set org.gnome.desktop.interface cursor-size " .. vars.cursorSize)
 
-	-- Location provider and night light
-	hl.exec_cmd("/usr/lib/geoclue-2.0/demos/agent")
-	hl.exec_cmd("sleep 1 && gammastep")
-	-- h1.exec_cmd("otd-daemon")
+	-- Night light. Was gammastep + the geoclue demo agent (geoclue purely as
+	-- gammastep's location provider for auto sunset/sunrise); both packages are
+	-- gone, so both lines were dead and there was no blue-light filter at all.
+	-- hyprsunset is the Hyprland-native replacement: 261 KiB, no geoclue, and
+	-- controllable at runtime over hyprctl. It reads ~/.config/hypr/hyprsunset.conf
+	-- and applies no filter until that file defines a schedule.
+	hl.exec_cmd("hyprsunset")
+
+	-- OpenTabletDriver, dead for the same reason hyprpolkitagent was: the unit is
+	-- WantedBy=graphical-session.target, which never activates here. The old
+	-- fallback on this line was commented out AND typo'd ("h1." not "hl."), so it
+	-- would not have run either way. The unit already ships Restart=always, so it
+	-- needs a trigger and nothing else -- no drop-in, unlike hyprpolkitagent.
+	-- Its condition is ConditionEnvironment=|WAYLAND_DISPLAY, hence the import.
+	hl.exec_cmd("systemctl --user import-environment WAYLAND_DISPLAY HYPRLAND_INSTANCE_SIGNATURE XDG_CURRENT_DESKTOP && systemctl --user restart opentabletdriver.service")
 
 	-- Forward bluetooth media commands to MPRIS
 	hl.exec_cmd("mpris-proxy")

@@ -155,8 +155,7 @@ hl.bind("SUPER + M", hl.dsp.exec_cmd("pear-desktop"))
 hl.bind("SUPER + A", hl.dsp.exec_cmd("shiru"))
 hl.bind("SUPER + O", hl.dsp.exec_cmd("flatpak run com.obsproject.Studio"))
 hl.bind("SUPER + P", hl.dsp.exec_cmd("flatpak run org.vinegarhq.Vinegar"))
-hl.bind("SUPER + Y", hl.dsp.exec_cmd("kitty nvim"))
-hl.bind("CTRL + ALT + Escape", hl.dsp.exec_cmd("app2unit -- qps"))
+hl.bind("SUPER + Y", hl.dsp.exec_cmd("gnome-text-editor"))
 
 -- Utilities
 hl.bind("Print", hl.dsp.exec_cmd("caelestia screenshot"), { locked = true })

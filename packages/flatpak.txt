@@ -3,6 +3,5 @@ com.valvesoftware.Steam	flathub
 net.davidotek.pupgui2	flathub
 net.nokyan.Resources	flathub
 org.kde.ark	flathub
-org.kde.optiimage	flathub
 org.vinegarhq.Sober	flathub
 org.vinegarhq.Vinegar	flathub

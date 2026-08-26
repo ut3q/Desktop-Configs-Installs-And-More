@@ -92,7 +92,6 @@ no GPG key and every pull then fails with "public key not found".
 - Build artifacts: `Vencord/dist`, `equicord.asar`, `quickshell/caelestia/build`
 - `.bak` sprawl, `__pycache__`, caches, logs, sockets, pid files
 - Games (~549G), browser profiles, Steam, `.local/share/osu`
-- `.local/bin/jan` — a 9MB downloaded binary, not a script
 - `/etc/fstab` — captured to `docs/` for reference only. **UUIDs are machine-specific;
   copying it blindly onto new hardware will produce an unbootable system.**
 

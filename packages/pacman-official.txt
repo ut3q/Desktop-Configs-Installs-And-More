@@ -35,6 +35,7 @@ gamescope
 gcc
 git
 gnome-keyring
+gnome-text-editor
 gst-plugin-pipewire
 gst-plugins-bad
 gst-plugins-base
@@ -45,6 +46,7 @@ hyprland
 hyprpicker
 hyprpolkitagent
 inotify-tools
+jpegoptim
 jq
 kdeconnect
 kvantum
@@ -72,8 +74,10 @@ noto-fonts
 noto-fonts-cjk
 noto-fonts-emoji
 npm
+ntsync-autoload
 obsidian
 otf-ipafont
+oxipng
 pacman-contrib
 papirus-icon-theme
 parallel
@@ -108,7 +112,6 @@ usbutils
 vulkan-radeon
 wev
 wget
-wine
 wireplumber
 wl-clip-persist
 wl-clipboard

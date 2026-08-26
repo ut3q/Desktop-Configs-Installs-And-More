@@ -1,0 +1,24 @@
+# User override shadowing /usr/share/applications/org.gnome.TextEditor.desktop.
+# XDG_DATA_HOME wins over /usr/share, so this survives pacman upgrades.
+# NOTE: a same-named override REPLACES the system entry outright -- the two are
+# not merged -- so every key the launcher needs has to be restated here.
+# The upstream Name[xx]= translations are deliberately dropped: keeping them
+# would still show "Text Editor" under any non-English locale.
+[Desktop Entry]
+Type=Application
+Name=Notepad
+GenericName=Text Editor
+Comment=View and edit text files
+Keywords=notepad;note;notes;notepad++;npp;text;txt;text editor;texteditor;editor;edit;write;writer;wordpad;plaintext;plain text;scratch;scratchpad;memo;pad;doc;document;gedit;kate;kwrite;mousepad;leafpad;pluma;xed;notepadqq;sublime;nano;vim;code;
+Exec=gnome-text-editor %U
+Icon=org.gnome.TextEditor
+Terminal=false
+StartupNotify=true
+DBusActivatable=true
+MimeType=text/plain;application/x-zerosize;
+Categories=Utility;TextEditor;
+Actions=new-window;
+
+[Desktop Action new-window]
+Name=New Notepad Window
+Exec=gnome-text-editor --new-window
