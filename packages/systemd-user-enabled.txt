@@ -1,0 +1,13 @@
+caelestia-upgrade-watch.path
+caelestia-shell-supervisor.service
+gamemoded.service
+hyprpolkitagent.service
+opentabletdriver.service
+wireplumber.service
+xdg-user-dirs.service
+ydotool.service
+gnome-keyring-daemon.socket
+p11-kit-server.socket
+pipewire-pulse.socket
+pipewire.socket
+caelestia-cache-prune.timer

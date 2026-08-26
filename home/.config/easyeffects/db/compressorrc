@@ -1,0 +1,9 @@
+[sie][Compressor#0]
+attack=15
+boostAmount=1
+boostThreshold=-60
+knee=-9
+makeup=4
+ratio=2.5
+release=200
+threshold=-22

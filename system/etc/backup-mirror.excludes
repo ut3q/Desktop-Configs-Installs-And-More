@@ -1,0 +1,34 @@
+# Anything matching these is NOT mirrored. One rsync pattern per line.
+# Edit freely -- the backup script reads this file every run.
+
+# --- pseudo-filesystems and volatile state ---
+/dev/*
+/proc/*
+/sys/*
+/run/*
+/tmp/*
+/var/tmp/*
+/mnt/*
+/media/*
+/lost+found
+
+# --- game installs (~578G) -- re-downloadable, explicitly excluded ---
+/home/aqua/.var/app/com.valvesoftware.Steam
+/home/aqua/.steam
+/home/aqua/.local/share/Steam
+/home/aqua/.local/share/osu
+/home/aqua/.local/share/osu-wine
+/home/aqua/.local/share/PrismLauncher
+
+# --- re-installable system-managed app payloads ---
+/var/lib/flatpak/app
+/var/lib/flatpak/runtime
+
+# --- caches: re-generated on demand, no restore value ---
+/home/aqua/.cache
+/var/cache/pacman/pkg/*
+/home/aqua/.var/app/*/cache
+/home/aqua/.local/share/Trash
+
+# --- large media parked under ~/go. Not OS. Delete this line to include it. ---
+/home/aqua/go/High School DxD*

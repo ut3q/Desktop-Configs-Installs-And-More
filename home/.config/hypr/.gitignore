@@ -1,0 +1,8 @@
+# Regenerated from the wallpaper on every scheme change -- would keep the repo
+# permanently dirty for no information.
+scheme/current.lua
+
+# The manual backups this repo replaces. Kept on disk, just not tracked.
+*.bak
+*.bak-*
+*.bak.*

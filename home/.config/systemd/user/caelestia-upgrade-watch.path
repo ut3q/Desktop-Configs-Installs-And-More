@@ -1,0 +1,11 @@
+[Unit]
+Description=Watch the pacman db for caelestia-shell/quickshell upgrades
+
+[Path]
+PathChanged=/var/lib/pacman/local
+# Not optional: a full -Syu creates hundreds of dirs in a burst, and the default
+# limit (200 per 2s) would put this unit into 'failed', silently ending the watch.
+TriggerLimitBurst=0
+
+[Install]
+WantedBy=default.target

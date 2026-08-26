@@ -1,0 +1,8 @@
+[Unit]
+Description=Notify when caelestia-shell or quickshell has been upgraded
+
+[Service]
+Type=oneshot
+# Let the transaction settle before querying the db.
+ExecStartPre=/usr/bin/sleep 25
+ExecStart=%h/.local/bin/caelestia-upgrade-watch

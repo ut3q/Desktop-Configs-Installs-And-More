@@ -1,0 +1,21 @@
+[Presets]
+lastLoadedInputPreset=Potato_tuned_v3 (1)
+
+[StreamInputs]
+inputDevice=alsa_input.usb-3142_fifine_Microphone-00.analog-stereo
+mostUsedPresets=Potato,Potato_tuned_v3 (1)
+plugins=rnnoise#0,equalizer#1,compressor#0,limiter#0
+usedPresets=Potato:9,Potato_tuned_v3 (1):5
+visiblePage=pluginsPage
+visiblePlugin=equalizer#1
+
+[StreamOutputs]
+outputDevice=alsa_output.pci-0000_0a_00.4.analog-stereo
+useDefaultOutputDevice=false
+visiblePage=pluginsPage
+
+[Window]
+height=527
+visiblePage=inputPage
+visiblePipeWirePage=testSignalsPage
+width=923

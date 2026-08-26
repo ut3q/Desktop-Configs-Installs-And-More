@@ -1,0 +1,447 @@
+#!/usr/bin/env bash
+# discord-updater — keep Discord + Equicord + OpenAsar in sync on Arch Linux.
+#
+# Every time the `discord` package is upgraded, pacman replaces
+# resources/app.asar, which wipes both the Equicord loader and OpenAsar.
+# This script re-applies them (in the correct order) using Equilotl, the
+# official Equicord CLI installer.
+#
+# Usage:  discord-updater [options]
+#
+# ACTIONS — at most one. With none of these, the default action runs:
+#   (default)            patch Discord now — repair Equicord, then OpenAsar
+#   -c, --check          report status only, change nothing
+#       --install-hook   install a pacman hook that patches after every upgrade
+#       --remove-hook    remove that hook
+#
+# MODIFIERS — these ride along with the action above. They are NOT actions:
+# passing only a modifier still runs the default action.
+#   -b, --branch B       stable | ptb | canary        (default: stable)
+#   -u, --upgrade        full system upgrade first (paru/yay/pacman -Syu)
+#   -k, --kill           close Discord before patching (then patches)
+#       --no-openasar    Equicord only, leave OpenAsar alone
+#       --no-equicord    OpenAsar only, never patch Equicord in
+#       --refresh        force re-download of the cached Equilotl CLI
+#       --user NAME      whose ~/.config/Equicord to install into
+#       --hook           internal: non-interactive mode used by the hook
+#   -h, --help           this text
+#   -V, --version        version
+#
+# Exit status: 0 if Discord ended up in the desired state, 1 otherwise — so
+# `discord-updater --check` is usable in scripts and status bars.
+#
+# Never runs a partial upgrade (`-Sy discord`) — that breaks Arch. --upgrade
+# does a full -Syu or nothing.
+
+set -euo pipefail
+
+VERSION=1.2.0
+SELF=$(readlink -f "${BASH_SOURCE[0]}")
+HOOK_PATH=${DISCORD_UPDATER_HOOK_PATH:-/etc/pacman.d/hooks/95-discord-equicord.hook}
+INSTALL_PATH=${DISCORD_UPDATER_INSTALL_PATH:-/usr/local/bin/discord-updater}
+EQUILOTL_URL=https://github.com/Equicord/Equilotl/releases/latest/download/EquilotlCli-Linux
+
+BRANCH=stable
+DO_UPGRADE=0
+CHECK_ONLY=0
+KILL_DISCORD=0
+WITH_OPENASAR=1
+WITH_EQUICORD=1
+REFRESH=0
+HOOK_MODE=0
+TARGET_USER=""
+
+# ---------------------------------------------------------------- output ----
+if [[ -t 1 ]]; then
+	C_RST=$'\e[0m'; C_B=$'\e[1m'; C_G=$'\e[32m'; C_Y=$'\e[33m'; C_R=$'\e[31m'; C_D=$'\e[90m'
+else
+	C_RST=""; C_B=""; C_G=""; C_Y=""; C_R=""; C_D=""
+fi
+info() { printf '%s::%s %s\n' "$C_B" "$C_RST" "$*"; }
+ok()   { printf '%s  ok%s %s\n' "$C_G" "$C_RST" "$*"; }
+warn() { printf '%s  !!%s %s\n' "$C_Y" "$C_RST" "$*" >&2; }
+die()  { printf '%s  xx%s %s\n' "$C_R" "$C_RST" "$*" >&2; exit 1; }
+dim()  { printf '%s     %s%s\n' "$C_D" "$*" "$C_RST"; }
+
+# ------------------------------------------------------------------ args ----
+while (($#)); do
+	case $1 in
+		-b|--branch)    BRANCH=${2:?missing branch}; shift 2 ;;
+		-u|--upgrade)   DO_UPGRADE=1; shift ;;
+		-c|--check)     CHECK_ONLY=1; shift ;;
+		-k|--kill)      KILL_DISCORD=1; shift ;;
+		--no-openasar)  WITH_OPENASAR=0; shift ;;
+		--no-equicord)  WITH_EQUICORD=0; shift ;;
+		--refresh)      REFRESH=1; shift ;;
+		--install-hook) ACTION=install-hook; shift ;;
+		--remove-hook)  ACTION=remove-hook; shift ;;
+		--hook)         HOOK_MODE=1; KILL_DISCORD=0; shift ;;
+		--user)         TARGET_USER=${2:?missing user}; shift 2 ;;
+		-V|--version)   echo "discord-updater $VERSION"; exit 0 ;;
+		-h|--help)      awk 'NR>1 && /^#/ {sub(/^# ?/,""); print; next} NR>1 {exit}' "$SELF"; exit 0 ;;
+		*)              die "unknown option: $1 (try --help)" ;;
+	esac
+done
+
+case $BRANCH in stable|ptb|canary) ;; *) die "branch must be stable, ptb or canary" ;; esac
+(( WITH_EQUICORD || WITH_OPENASAR )) || die "--no-equicord and --no-openasar together leave nothing to do"
+
+if (( CHECK_ONLY )); then
+	(( DO_UPGRADE ))   && die "--check changes nothing; drop --upgrade (that would run a full -Syu)"
+	(( KILL_DISCORD )) && die "--check changes nothing; drop --kill"
+	(( REFRESH ))      && warn "--refresh has no effect with --check; ignoring"
+fi
+
+# ----------------------------------------------------------- user + env -----
+# Equicord's asar lives in the *user's* config dir. When we elevate (or when
+# pacman runs us as root from the hook) we must point Equilotl back at it,
+# otherwise it installs into /root and Discord never finds it.
+if [[ -z $TARGET_USER ]]; then
+	if [[ $EUID -eq 0 && -n ${SUDO_USER:-} ]]; then TARGET_USER=$SUDO_USER
+	else TARGET_USER=$(id -un); fi
+fi
+[[ $TARGET_USER == root ]] && warn "running as root with no target user; Equicord will install into /root"
+
+USER_HOME=$(getent passwd "$TARGET_USER" | cut -d: -f6) || die "no such user: '$TARGET_USER'"
+[[ -n $USER_HOME && -d $USER_HOME ]] || die "no home directory for user '$TARGET_USER'"
+CONFIG_HOME=${XDG_CONFIG_HOME:-$USER_HOME/.config}
+[[ $CONFIG_HOME == /* ]] || CONFIG_HOME=$USER_HOME/.config
+EQUICORD_DATA_DIR=$CONFIG_HOME/Equicord
+CACHE_DIR=${XDG_CACHE_HOME:-$USER_HOME/.cache}/discord-updater
+
+# ------------------------------------------------------- discord location ---
+# Discord's Linux host updater does not upgrade in place: it drops each new
+# version into ~/.config/discord/app-<version>/ and runs from there. When that
+# has happened, the system-wide copy under /opt is a decoy — patching it does
+# nothing, because it is not what launches. So look there FIRST.
+newest_relocated_install() {
+	local root=$CONFIG_HOME/discord
+	case $BRANCH in
+		ptb)    root=$CONFIG_HOME/discordptb ;;
+		canary) root=$CONFIG_HOME/discordcanary ;;
+	esac
+	[[ -d $root ]] || return 1
+	local d v best="" bestv=""
+	for d in "$root"/app-*; do
+		[[ -e $d/resources/app.asar || -e $d/resources/_app.asar ]] || continue
+		v=${d##*/app-}
+		if [[ -z $bestv ]] || [[ $(printf '%s\n%s\n' "$bestv" "$v" | sort -V | tail -1) == "$v" ]]; then
+			bestv=$v; best=$d
+		fi
+	done
+	[[ -n $best ]] || return 1
+	echo "$best"
+}
+
+find_discord_dir() {
+	local -a candidates=()
+	local relocated
+	relocated=$(newest_relocated_install) && candidates+=("$relocated")
+	case $BRANCH in
+		stable) candidates+=(/opt/discord /usr/lib/discord /usr/share/discord /opt/Discord) ;;
+		ptb)    candidates+=(/opt/discord-ptb /usr/lib/discord-ptb /usr/share/discord-ptb /opt/DiscordPTB) ;;
+		canary) candidates+=(/opt/discord-canary /usr/lib/discord-canary /usr/share/discord-canary /opt/DiscordCanary) ;;
+	esac
+	local d
+	for d in "${candidates[@]}"; do
+		[[ -e $d/resources/app.asar ]] && { echo "$d/resources"; return 0; }
+		[[ -e $d/app.asar ]]           && { echo "$d"; return 0; }   # discord_arch_electron
+	done
+	return 1
+}
+
+# Mirrors Equilotl's own check: it looks at _app.asar first, then app.asar,
+# and only inspects whichever it finds first.
+openasar_installed() {
+	local f
+	if (( ! WITH_EQUICORD )); then
+		# With no Equicord loader in front, OpenAsar must be app.asar itself.
+		# A leftover _app.asar from an old patch would otherwise be inspected
+		# first and report OpenAsar as present when it is not actually loading.
+		[[ -f $RES_DIR/app.asar ]] || return 1
+		grep -qa OpenAsar "$RES_DIR/app.asar"
+		return
+	fi
+	for f in "$RES_DIR/_app.asar" "$RES_DIR/app.asar"; do
+		[[ -f $f ]] || continue
+		if grep -qa OpenAsar "$f"; then return 0; else return 1; fi
+	done
+	return 1
+}
+
+# The Equicord loader asar is a ~200 byte archive holding one index.js that
+# requires equicord.asar. Checking only for "small + contains require(" is NOT
+# enough: an OpenAsar-only install puts a 40KB asar full of require() calls at
+# this same path and would be misreported as patched. So match the loader's
+# pretty-printed package.json too, which is what Equilotl itself keys off.
+equicord_patched() {
+	local app=$RES_DIR/app.asar size
+	[[ -f $app ]] || return 1
+	size=$(stat -c%s "$app" 2>/dev/null) || return 1
+	(( size < 131072 )) || return 1
+	grep -qa 'require(' "$app" || return 1
+	grep -qa '"main": "index.js"' "$app"
+}
+
+# A Discord upgrade landed while we were patched: app.asar is vanilla again
+# but the old _app.asar (which may hold a stale OpenAsar) is still lying around.
+# Equilotl cleans this up on -repair; we only need to recognise it.
+stale_leftovers() {
+	[[ -f $RES_DIR/_app.asar ]] && ! equicord_patched
+}
+
+discord_running() {
+	local base=${RES_DIR%/resources} p pid exe comm
+	local -a mine=()
+	# Collect our own process ancestry first. Without this, a shell whose
+	# command line merely mentions /opt/discord looks like a running client.
+	pid=$$
+	while [[ -n $pid && $pid != 0 ]]; do
+		mine+=("$pid")
+		# field 2 of /proc/PID/stat is "(comm)" and can contain spaces, so
+		# strip it before counting fields; PPID is then the 2nd remaining one
+		pid=$(awk '{sub(/^[0-9]+ \(.*\) /,""); print $2}' "/proc/$pid/stat" 2>/dev/null) || break
+	done
+	for p in /proc/[0-9]*; do
+		pid=${p##*/}
+		[[ " ${mine[*]} " == *" $pid "* ]] && continue
+		# Electron rewrites its own command line, so the process name is
+		# often the only thing left that says "Discord"
+		read -r comm 2>/dev/null <"$p/comm" || continue
+		case $comm in
+			Discord|DiscordPTB|DiscordCanary|discord|discord-ptb|discord-canary) return 0 ;;
+		esac
+		exe=$(readlink "$p/exe" 2>/dev/null) || true
+		[[ -n $exe && $exe == "$base"/* ]] && return 0
+		# system-electron packages (discord_arch_electron) run electron with
+		# the asar passed as an argument
+		grep -qa -- "$base/" "$p/cmdline" 2>/dev/null && return 0
+	done
+	return 1
+}
+
+# ----------------------------------------------------------- equilotl cli ---
+resolve_equilotl() {
+	local c
+	if [[ -n ${EQUILOTL_BIN:-} ]]; then echo "$EQUILOTL_BIN"; return; fi
+	if (( ! REFRESH )); then
+		for c in EquilotlCli EquilotlCli-Linux equilotl-cli equilotlcli \
+		         equicord-installer-cli equicordinstallercli Equilotl; do
+			if command -v "$c" >/dev/null 2>&1; then command -v "$c"; return; fi
+		done
+	fi
+	local cached=$CACHE_DIR/EquilotlCli-Linux
+	if (( REFRESH )) || [[ ! -x $cached ]]; then
+		command -v curl >/dev/null || die "no Equilotl installed and curl is missing"
+		info "fetching the Equicord CLI installer" >&2
+		mkdir -p "$CACHE_DIR"
+		curl -fsSL --retry 3 -o "$cached.part" "$EQUILOTL_URL" \
+			|| die "could not download Equilotl from GitHub"
+		chmod +x "$cached.part"; mv "$cached.part" "$cached"
+		[[ $EUID -eq 0 ]] && chown -R "$TARGET_USER" "$CACHE_DIR" 2>/dev/null
+	fi
+	echo "$cached"
+}
+
+# Equilotl creates its data dir with a plain mkdir, so the parent has to exist.
+ensure_config_home() {
+	[[ -d $CONFIG_HOME ]] && return 0
+	if [[ $EUID -eq 0 ]]; then
+		install -d -m 700 -o "$TARGET_USER" -g "$(id -gn "$TARGET_USER")" "$CONFIG_HOME"
+	else
+		mkdir -p "$CONFIG_HOME"
+	fi
+}
+
+# Equilotl needs root to write /opt, and the user's HOME to find equicord.asar.
+# It also keys off SUDO_USER to fix ownership, so that is always set.
+# Equilotl only auto-discovers the standard system paths, so anything else
+# (notably a relocated install) has to be named with -location. That flag is
+# mutually exclusive with -branch.
+discord_selector() {
+	local base=${RES_DIR%/resources}
+	case $base in
+		/opt/*|/usr/lib/*|/usr/share/*) printf '%s\0%s' -branch "$BRANCH" ;;
+		*)                              printf '%s\0%s' -location "$base" ;;
+	esac
+}
+
+# A relocated install lives under the user's own config dir and needs no root.
+# Only the system-wide copies under /opt do.
+run_equilotl() {
+	local -a env_args=(
+		"HOME=$USER_HOME"
+		"XDG_CONFIG_HOME=$CONFIG_HOME"
+		"EQUICORD_USER_DATA_DIR=$EQUICORD_DATA_DIR"
+		"SUDO_USER=$TARGET_USER"
+	)
+	local -a sel=()
+	mapfile -t -d '' sel < <(discord_selector)
+	if [[ $EUID -eq 0 || -w $RES_DIR ]]; then
+		env "${env_args[@]}" "$EQUILOTL" "$@" "${sel[@]}"
+	else
+		sudo env "${env_args[@]}" "$EQUILOTL" "$@" "${sel[@]}"
+	fi
+}
+
+# ---------------------------------------------------------- pacman hook -----
+write_hook() {
+	local HOOK_MODE_ARGS=""
+	(( WITH_EQUICORD )) || HOOK_MODE_ARGS+=" --no-equicord"
+	(( WITH_OPENASAR )) || HOOK_MODE_ARGS+=" --no-openasar"
+	# no -E: some sudoers configs forbid it, and --user carries what we need
+	[[ $EUID -eq 0 ]] || exec sudo "$SELF" --install-hook --branch "$BRANCH" --user "$TARGET_USER" $HOOK_MODE_ARGS
+	# -ef so that running the already-installed copy is not an error
+	if [[ $SELF -ef $INSTALL_PATH ]]; then
+		dim "already running from $INSTALL_PATH"
+	else
+		install -Dm755 "$SELF" "$INSTALL_PATH"
+		ok "installed $INSTALL_PATH"
+	fi
+	install -d "$(dirname "$HOOK_PATH")"
+	cat >"$HOOK_PATH" <<-EOF
+		[Trigger]
+		Operation = Install
+		Operation = Upgrade
+		Type = Package
+		Target = discord
+		Target = discord_arch_electron
+		Target = discord-electron
+		Target = discord-ptb
+		Target = discord-canary
+
+		[Action]
+		Description = Re-applying Equicord + OpenAsar to Discord...
+		When = PostTransaction
+		Depends = bash
+		Exec = $INSTALL_PATH --hook --branch $BRANCH --user $TARGET_USER$HOOK_MODE_ARGS
+	EOF
+	chmod 644 "$HOOK_PATH"
+	ok "installed $HOOK_PATH  (runs after every Discord upgrade)"
+	exit 0
+}
+
+remove_hook() {
+	[[ $EUID -eq 0 ]] || exec sudo "$SELF" --remove-hook
+	if [[ -e $HOOK_PATH ]]; then
+		rm -f "$HOOK_PATH"; ok "removed $HOOK_PATH"
+	else
+		warn "no hook at $HOOK_PATH — nothing to remove"
+	fi
+	dim "left $INSTALL_PATH in place — delete it manually if you want it gone"
+	exit 0
+}
+
+case ${ACTION:-} in
+	install-hook) write_hook ;;
+	remove-hook)  remove_hook ;;
+esac
+
+# ------------------------------------------------------------------ main ----
+if (( DO_UPGRADE )); then
+	# Full upgrade only. Never `-Sy discord` — partial upgrades break Arch.
+	if   [[ $EUID -eq 0 ]];          then info "pacman -Syu"; pacman -Syu
+	elif command -v paru >/dev/null; then info "paru -Syu";   paru -Syu
+	elif command -v yay  >/dev/null; then info "yay -Syu";    yay  -Syu
+	else info "pacman -Syu"; sudo pacman -Syu; fi
+fi
+
+RES_DIR=$(find_discord_dir) || die "no Discord ($BRANCH) install found — is the package installed?"
+dim "discord: $RES_DIR"
+dim "equicord data: $EQUICORD_DATA_DIR (user $TARGET_USER)"
+
+report_state() {
+	local rc=0
+	if (( ! WITH_EQUICORD )); then
+		if [[ -f $RES_DIR/_app.asar ]]; then
+			warn "leftover _app.asar from an old Equicord patch is still there"
+			dim "(Equilotl -uninstall -location ${RES_DIR%/resources} removes it)"
+		fi
+	elif equicord_patched; then ok "Equicord loader present"
+	else warn "Equicord loader missing"; rc=1; fi
+	if (( WITH_OPENASAR )); then
+		if openasar_installed; then ok "OpenAsar present"
+		else warn "OpenAsar missing"; rc=1; fi
+	fi
+	return $rc
+}
+
+if (( CHECK_ONLY )); then
+	rc=0
+	if (( ! WITH_EQUICORD )); then
+		report_state || rc=1
+		discord_running && warn "Discord is running" || dim "discord is not running"
+		exit $rc
+	fi
+	if equicord_patched; then
+		ok "Equicord loader present"
+		if (( WITH_OPENASAR )); then
+			openasar_installed && ok "OpenAsar present" || { warn "OpenAsar NOT installed"; rc=1; }
+		fi
+	elif stale_leftovers; then
+		warn "Discord was upgraded while patched — Equicord and OpenAsar are both gone"
+		dim "(a stale _app.asar is still there; a normal run cleans it up)"
+		rc=1
+	else
+		warn "Equicord NOT patched in"
+		rc=1
+		if (( WITH_OPENASAR )); then
+			openasar_installed && ok "OpenAsar present" || warn "OpenAsar NOT installed"
+		fi
+	fi
+	discord_running && warn "Discord is running" || dim "discord is not running"
+	exit $rc
+fi
+
+if (( WITH_EQUICORD && WITH_OPENASAR )); then
+	info "action: install/repair Equicord + OpenAsar for Discord $BRANCH"
+elif (( WITH_EQUICORD )); then
+	info "action: install/repair Equicord (only) for Discord $BRANCH"
+else
+	info "action: install/repair OpenAsar (only) for Discord $BRANCH"
+fi
+
+if discord_running; then
+	if (( KILL_DISCORD )); then
+		pname=Discord
+		[[ $BRANCH == ptb ]]    && pname=DiscordPTB
+		[[ $BRANCH == canary ]] && pname=DiscordCanary
+		info "closing $pname"
+		pkill -x "$pname" 2>/dev/null || pkill -f "$RES_DIR" 2>/dev/null || true
+		for _ in {1..15}; do discord_running || break; sleep 1; done
+		discord_running && warn "Discord did not exit; patching may fail on busy files"
+	elif (( ! HOOK_MODE )); then
+		warn "Discord is running — patching will apply, but you must fully restart it"
+		warn "(pass --kill to close it automatically)"
+	fi
+fi
+
+ensure_config_home
+EQUILOTL=$(resolve_equilotl)
+dim "installer: $EQUILOTL"
+
+# Equicord FIRST, then OpenAsar. Order matters: -repair cleans up the stale
+# _app.asar that a Discord upgrade leaves behind, so OpenAsar's own check
+# sees a clean vanilla asar and backs up the right file.
+# Equilotl refuses to patch if it cannot reach GitHub for release data. That
+# leaves Discord untouched rather than half-patched, so retrying later is safe.
+if (( WITH_EQUICORD )); then
+	info "installing/repairing Equicord ($BRANCH)"
+	run_equilotl -repair \
+		|| die "Equilotl failed to patch Discord (Discord left as-is). If it could not reach GitHub, run this again later."
+fi
+
+if (( WITH_OPENASAR )); then
+	if openasar_installed; then
+		ok "OpenAsar already in place"
+	else
+		info "installing OpenAsar"
+		run_equilotl -install-openasar || warn "OpenAsar install failed"
+	fi
+fi
+
+echo
+rc=0
+report_state || rc=1
+(( HOOK_MODE )) || info "fully quit and relaunch Discord to pick this up"
+exit $rc

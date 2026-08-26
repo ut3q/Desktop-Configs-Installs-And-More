@@ -1,0 +1,38 @@
+{
+  "entries": [
+    {
+      "_type": "url",
+      "ie_key": "Youtube",
+      "id": "yT_aFozeDc8",
+      "url": "https://www.youtube.com/watch?v=yT_aFozeDc8",
+      "title": "I Redesigned the ENTIRE Apple Music UI",
+      "description": "Try Mobbin for free and get 20% off your first year's subscription: https://mobbin.com/juxtopposed I tried redesigning the Apple ...",
+      "duration": 1260.0,
+      "channel_id": "UCa8W2_uf81Ew6gYuw0VPSeA",
+      "channel": "Juxtopposed",
+      "channel_url": "https://www.youtube.com/channel/UCa8W2_uf81Ew6gYuw0VPSeA",
+      "uploader": "Juxtopposed",
+      "uploader_id": "@juxtopposed",
+      "uploader_url": "https://www.youtube.com/@juxtopposed",
+      "thumbnails": [
+        {
+          "url": "https://i.ytimg.com/vi/yT_aFozeDc8/hq720.jpg?sqp=-oaymwEcCOgCEMoBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLBDFHWGE60jiSa-QvCbihrxo2-KFQ",
+          "height": 202,
+          "width": 360
+        },
+        {
+          "url": "https://i.ytimg.com/vi/yT_aFozeDc8/hq720.jpg?sqp=-oaymwEcCNAFEJQDSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLDFHUuF01kDSvZFXZ-RXpqXvdUkPg",
+          "height": 404,
+          "width": 720
+        }
+      ],
+      "timestamp": 1775347200,
+      "release_timestamp": null,
+      "availability": null,
+      "view_count": 118164,
+      "live_status": null,
+      "channel_is_verified": true,
+      "__x_forwarded_for_ip": null
+    }
+  ]
+}

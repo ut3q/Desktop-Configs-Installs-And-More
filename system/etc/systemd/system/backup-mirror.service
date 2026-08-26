@@ -1,0 +1,11 @@
+[Unit]
+Description=Mirror the OS to /mnt/backup
+RequiresMountsFor=/mnt/backup
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/backup-mirror
+# Backups must never compete with the desktop for IO or CPU.
+IOSchedulingClass=idle
+CPUSchedulingPolicy=idle
+Nice=19

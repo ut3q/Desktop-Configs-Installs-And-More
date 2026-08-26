@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Mirror the OS to /mnt/backup/current, then snapshot it for point-in-time
+# recovery. Incremental: only changed blocks move after the first run.
+set -uo pipefail
+DEST=/mnt/backup
+KEEP=14
+
+log() { printf '[backup-mirror] %s\n' "$*"; }
+
+mountpoint -q "$DEST" || { log "FATAL: $DEST is not mounted"; exit 1; }
+[ -d "$DEST/current" ] || { log "FATAL: $DEST/current missing"; exit 1; }
+
+log "starting rsync"
+# -aAXH  archive + ACLs + xattrs + hardlinks, so a restore is faithful
+# --delete  true mirror: things removed from the source leave the mirror too
+#           (that is what the snapshots below are for)
+# NO -x. /home, /var/log and /var/cache/pacman/pkg are SEPARATE btrfs subvolume
+# mounts, so one-filesystem mode silently skips all of them -- a 47G "backup"
+# containing zero user data. The exclude list below handles pseudo-filesystems
+# instead, and /mnt/* keeps it from recursing into its own destination.
+rsync -aAXH --delete \
+      --exclude-from=/etc/backup-mirror.excludes \
+      --info=stats2 \
+      / "$DEST/current/"
+rc=$?
+# 24 = "files vanished during transfer", normal on a live system
+if [ $rc -ne 0 ] && [ $rc -ne 24 ]; then
+  log "rsync FAILED (exit $rc) -- not snapshotting a bad mirror"
+  exit $rc
+fi
+
+SNAP="$DEST/snapshots/$(date +%Y-%m-%d_%H%M%S)"
+btrfs subvolume snapshot -r "$DEST/current" "$SNAP" >/dev/null && log "snapshot: $SNAP"
+
+# Retention: keep the newest $KEEP, delete the rest.
+mapfile -t old < <(ls -1d "$DEST"/snapshots/*/ 2>/dev/null | sort | head -n -"$KEEP")
+for s in "${old[@]:-}"; do
+  [ -n "$s" ] || continue
+  btrfs subvolume delete "${s%/}" >/dev/null && log "pruned $(basename "${s%/}")"
+done
+
+log "done. mirror: $(du -sh "$DEST/current" 2>/dev/null | cut -f1), snapshots: $(ls -1d "$DEST"/snapshots/*/ 2>/dev/null | wc -l)"

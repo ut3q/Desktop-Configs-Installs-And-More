@@ -1,0 +1,16 @@
+[Unit]
+Description=Sunshine desktop scaling and idle inhibition
+# Bound to Sunshine: stopping Sunshine stops this, which releases the idle
+# inhibitor and restores the desktop scale via the script's EXIT trap.
+BindsTo=app-dev.lizardbyte.app.Sunshine.service
+After=app-dev.lizardbyte.app.Sunshine.service
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/sunshine-scale-watch
+# A BindsTo teardown delivers SIGTERM; the EXIT trap runs and the script ends
+# with 143. That is a clean stop, not a failure -- without this the unit is
+# marked failed and Restart=on-failure churns while Sunshine is down.
+SuccessExitStatus=143 SIGTERM
+Restart=on-failure
+RestartSec=5s

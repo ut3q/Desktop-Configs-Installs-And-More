@@ -1,0 +1,46 @@
+# ---- build artifacts / vendored bundles: reinstalled by the package manager ----
+home/.config/Vencord/dist/
+home/.config/Equicord/equicord.asar
+home/.config/quickshell/caelestia/build/
+
+# ---- caches and compiled junk ----
+__pycache__/
+*.pyc
+node_modules/
+.venv/
+
+# ---- the .bak sprawl this repo exists to replace ----
+*.bak
+*.bak.*
+*.bak-*
+*.orig
+*~
+*.original-backup
+* (copy *)
+
+# ---- runtime state, not configuration ----
+home/.config/Vencord/settings/quickCss.css.lock
+home/.config/**/Cache/
+home/.config/**/GPUCache/
+home/.config/**/Crashpad/
+home/.config/**/logs/
+*.log
+*.sqlite-wal
+*.sqlite-shm
+*.sock
+*.pid
+
+# ---- never, under any circumstances ----
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+.env
+.env.*
+*credentials*
+*.gnupg/
+
+# ---- cookie jars = live logged-in sessions. NEVER commit. ----
+*cookies*
+*.cookies
+cookies*.txt

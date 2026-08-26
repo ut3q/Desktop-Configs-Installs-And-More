@@ -1,0 +1,38 @@
+[Unit]
+Description=EasyEffects audio processing (input chain: rnnoise, eq, compressor, limiter)
+Documentation=https://github.com/wwmm/easyeffects
+# EasyEffects builds its filter chain as PipeWire nodes, so it is meaningless
+# without PipeWire and must be rebuilt whenever PipeWire restarts.
+#
+#   PartOf   -> a `systemctl --user restart pipewire` stops this too
+#   WantedBy -> ...and PipeWire starting pulls it straight back up
+#
+# Deliberately NOT BindsTo: pipewire.service is socket-activated
+# (TriggeredBy=pipewire.socket), and BindsTo on a socket-activated unit
+# propagates stop-jobs aggressively enough that systemd SIGKILLed this within a
+# second of every start. PartOf gives the restart coupling without that.
+After=pipewire.service pipewire-pulse.service wireplumber.service
+PartOf=pipewire.service
+
+[Service]
+Type=simple
+# Hyprland sets these in env.lua for ITS children, but they are never imported
+# into the systemd --user manager, so a service started here is a Qt app with
+# no platform hint and DISPLAY=:1 set -- a very different startup path from the
+# one that works when launched from a Hyprland-spawned shell.
+Environment="QT_QPA_PLATFORM=wayland;xcb"
+Environment="XDG_SESSION_TYPE=wayland" 
+# --gapplication-service is DEPRECATED in 8.x (the Qt rewrite) and only prints
+# a notice pointing here. execs.lua was still passing the old flag.
+ExecStart=/usr/bin/easyeffects --service-mode
+# Let PipeWire finish publishing its nodes before building filters on top of
+# them, or the chain can come up half-attached.
+ExecStartPre=/usr/bin/sleep 3
+Restart=on-failure
+RestartSec=3
+# Do not spin forever if something is genuinely broken.
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+[Install]
+WantedBy=pipewire.service

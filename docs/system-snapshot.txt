@@ -1,0 +1,16 @@
+# Captured 2026-08-26T10:43:15-05:00 on atrasia-ocean
+
+## Kernel
+Linux atrasia-ocean 7.1.8-zen1-3-zen #1 ZEN SMP PREEMPT_DYNAMIC Tue, 11 Aug 2026 09:59:01 +0000 x86_64 GNU/Linux
+
+## Shell
+/usr/bin/bash
+
+## Disks
+NAME          SIZE FSTYPE LABEL  MOUNTPOINT
+zram0        15.6G swap   zram0  [SWAP]
+nvme0n1       1.8T               
+├─nvme0n1p1     1G vfat          /boot
+└─nvme0n1p2   1.8T btrfs         /var/log
+nvme1n1     931.5G               
+└─nvme1n1p1 931.5G btrfs  backup /mnt/backup

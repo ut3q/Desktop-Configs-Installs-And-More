@@ -1,0 +1,12 @@
+[sie][BassEnhancer#0]
+amount=35.9
+bypass=true
+outputGain=6
+
+[sie][BassEnhancer#1]
+bypass=true
+outputGain=36
+
+[sie][BassEnhancer#2]
+bypass=true
+outputGain=36

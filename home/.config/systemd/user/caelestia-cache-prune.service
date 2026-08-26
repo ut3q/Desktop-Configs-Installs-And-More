@@ -1,0 +1,8 @@
+[Unit]
+Description=Bound the Caelestia image cache (it has no eviction of its own)
+
+[Service]
+Type=oneshot
+Nice=15
+IOSchedulingClass=idle
+ExecStart=%h/.config/hypr/scripts/caelestia-cache-prune.sh prune

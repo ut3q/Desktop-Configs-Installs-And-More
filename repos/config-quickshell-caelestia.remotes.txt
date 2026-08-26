@@ -1,0 +1,2 @@
+upstream	https://github.com/caelestia-dots/shell.git (fetch)
+upstream	https://github.com/caelestia-dots/shell.git (push)

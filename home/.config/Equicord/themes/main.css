@@ -1,0 +1,56 @@
+/**
+ * @name Catppuccin Mocha
+ * @author winston#0001
+ * @authorId 505490445468696576
+ * @version 0.2.0
+ * @description 🎮 Soothing pastel theme for Discord
+ * @website https://github.com/catppuccin/discord
+ * @invite r6Mdz5dpFc
+ * **/
+
+@import url("https://catppuccin.github.io/discord/dist/catppuccin-mocha.theme.css");
+
+/* REMOVE QUICK REACT BAR */
+.button_f7ecac.hoverBarButton_f84418:nth-of-type(1),
+.button_f7ecac.hoverBarButton_f84418:nth-of-type(2),
+.button_f7ecac.hoverBarButton_f84418:nth-of-type(3),
+.separator_f84418 {
+    display: none;
+}
+
+
+/* Server status removal */
+
+[class*='membersGroup']:has([role=button]),
+[class*='member'] [class*='container']:has([class*='badges']) {
+    display: none;
+}
+
+
+/* Hide nameplate thing */
+
+.container__4bbc6 {
+    background: linear-gradient(90deg, rgba(42, 123, 155, 0) 0%, rgba(237, 221, 83, 0) 100%) !important;
+}
+
+.videoContainer__4bbc6 {
+    mask-image: none !important;
+}
+
+.img__4bbc6 {
+    display: none;
+}
+
+
+/* Hide clan (guild) tags */
+[class*="chipletContainerInner_"]:has([src*="/clan-badges/"]) {
+    display: none;
+}
+
+*[class^='nowPlayingColumn'] {
+    display: none;
+}
+
+#vc-indicators-container {
+    display: none !important;
+}

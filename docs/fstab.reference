@@ -1,0 +1,23 @@
+# /dev/nvme0n1p2 (Root)
+UUID=5169cf24-abdc-4c37-9dfc-b6d29ddca032  /                      btrfs  rw,noatime,compress=zstd:1,subvol=@ 0 0
+
+# /dev/nvme0n1p2 (Home)
+UUID=5169cf24-abdc-4c37-9dfc-b6d29ddca032  /home                  btrfs  rw,noatime,compress=zstd:1,subvol=@home 0 0
+
+# /dev/nvme0n1p2 (Pacman Cache)
+UUID=5169cf24-abdc-4c37-9dfc-b6d29ddca032  /var/cache/pacman/pkg  btrfs  rw,noatime,compress=zstd:1,subvol=@pkg 0 0
+
+# /dev/nvme0n1p2 (Logs)
+UUID=5169cf24-abdc-4c37-9dfc-b6d29ddca032  /var/log               btrfs  rw,noatime,compress=zstd:1,subvol=@log 0 0
+
+# /dev/nvme0n1p1 (Boot)
+UUID=E82B-B23E                             /boot                  vfat   rw,noatime,fmask=0022,dmask=0022,codepage=437,iocharset=ascii,shortname=mixed,utf8,errors=remount-ro 0 2
+
+# Secondary Clone Drive (The WD Black)
+# 'noauto' prevents mounting at boot. 
+# 'x-systemd.automount' makes it mount only when you actually click the folder.
+#UUID=996a6cfa-0c23-472e-af95-56e629378b45  /mnt/clone             btrfs  noauto,x-systemd.automount,x-systemd.idle-timeout=31,noatime 0 0
+
+
+#CLOUDDDD
+UUID=20b4aa86-0e5a-40f2-b0fb-01a311dca35a  /mnt/backup  btrfs  rw,noatime,compress=zstd:1,nofail,x-systemd.device-timeout=5s  0  0

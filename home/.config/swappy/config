@@ -1,0 +1,17 @@
+[Default]
+# swappy had no config file at all, so it fell back to its compiled-in
+# default of $XDG_DESKTOP_DIR and every "save" landed in ~/Desktop, which
+# Hyprland never shows you.
+save_dir=$HOME/Pictures/Screenshots
+save_filename_format=screenshot-%Y%m%d-%H%M%S.png
+show_panel=true
+line_size=5
+text_size=20
+text_font=sans-serif
+paint_mode=brush
+early_exit=true
+fill_shape=false
+auto_save=false
+transparency=255
+transparent=true
+custom_color=rgba(255,255,255,1)

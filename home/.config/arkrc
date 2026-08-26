@@ -1,0 +1,10 @@
+[ExtractDialog]
+1920x1080 screen: Window-Maximized=true
+DirHistory[$e]=$HOME/Downloads/,$HOME/.local/share/PrismLauncher/instances/MC Eternal 2 New/minecraft/saves/
+
+[General]
+LockSidebar=true
+ShowSidebar=true
+
+[MainWindow]
+StatusBar=Disabled

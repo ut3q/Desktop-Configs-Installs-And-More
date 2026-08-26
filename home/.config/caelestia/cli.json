@@ -1,0 +1,41 @@
+{
+    "toggles": {
+        "communication": {
+            "discord": {
+                "enable": false
+            },
+            "vesktop": {
+                "enable": false
+            },
+            "legcord": {
+                "enable": true,
+                "match": [
+                    {
+                        "class": "legcord"
+                    }
+                ],
+                "command": [
+                    "/home/aqua/discord-tweaks/legcord-log"
+                ],
+                "move": true
+            }
+        },
+        "music": {
+            "youtube": {
+                "enable": true,
+                "match": [
+                    {
+                        "class": "com.github.th_ch.youtube_music"
+                    },
+                    {
+                        "initialTitle": "com.github.th_ch.youtube_music"
+                    }
+                ],
+                "command": [
+                    "pear-dekstop"
+                ],
+                "move": true
+            }
+        }
+    }
+}

@@ -1,0 +1,40 @@
+{
+    "appearance": {
+        "animDurations": {
+            "expressiveDefaultSpatial": 420,
+            "expressiveFastSpatial": 260,
+            "expressiveSlowSpatial": 820,
+            "extraLarge": 420,
+            "large": 300,
+            "normal": 260,
+            "small": 140
+        }
+    },
+    "sizes": {
+        "bar": {
+            "innerWidth": 35
+        },
+        "dashboard": {
+            "dateTimeWidth": 92,
+            "logoSize": 26,
+            "mediaCoverArtSize": 150,
+            "mediaProgressThickness": 4,
+            "mediaWidth": 165,
+            "resourceProgressThickness": 4,
+            "tabIndicatorHeight": 2,
+            "tabIndicatorSpacing": 3,
+            "uptimeSize": 26,
+            "userWidth": 270,
+            "weatherWidth": 220
+        },
+        "nexus": {
+            "heightMult": 0.62,
+            "maxContentWidth": 700,
+            "maxNavWidth": 480,
+            "minHeight": 440,
+            "minPopupHeight": 170,
+            "minWidth": 700,
+            "popupWidth": 260
+        }
+    }
+}

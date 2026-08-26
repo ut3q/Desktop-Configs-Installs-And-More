@@ -1,0 +1,16 @@
+[Unit]
+Description=Keep the Caelestia shell alive and record why it ever is not
+# No Hyprland dependency on purpose: the script waits for the compositor itself,
+# so this works whether systemd or Hyprland comes up first.
+
+[Service]
+Type=simple
+ExecStart=%h/.config/hypr/scripts/caelestia-shell-supervisor.sh run
+# The supervisor is the thing that makes the bar self-healing, so it must be
+# self-healing too. Nothing supervised it while it ran as a Hyprland child.
+Restart=always
+RestartSec=5
+Nice=5
+
+[Install]
+WantedBy=default.target
