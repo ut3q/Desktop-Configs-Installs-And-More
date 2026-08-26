@@ -1,0 +1,29 @@
+"361420"
+{
+	"ChangeNumber"		"1"
+	"OSType"		"0"
+	"Astro/Saved/SaveGames/PersistentLocalPlayerData.savecfg"
+	{
+		"root"		"3"
+		"size"		"2857"
+		"localtime"		"1783594449"
+		"time"		"1783594448"
+		"remotetime"		"1783594448"
+		"sha"		"0337fad52d1577aaa41afeca6a3c964d79f297ef"
+		"syncstate"		"1"
+		"persiststate"		"0"
+		"platformstosync2"		"-1"
+	}
+	"Astro/Saved/SaveGames/SAVE_1$2026.07.09-06.41.04.savegame"
+	{
+		"root"		"3"
+		"size"		"924984"
+		"localtime"		"1783597265"
+		"time"		"1783597264"
+		"remotetime"		"1783597264"
+		"sha"		"534844f733a77fea66b265790637f838775d1d78"
+		"syncstate"		"1"
+		"persiststate"		"0"
+		"platformstosync2"		"-1"
+	}
+}

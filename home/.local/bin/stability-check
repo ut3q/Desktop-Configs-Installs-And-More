@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# stability-check -- after a BIOS/tuning change, did the machine log any
+# hardware distress? Run it after a session of real load.
+#   stability-check          this boot
+#   stability-check -a       last 14 days, all boots
+set -uo pipefail
+SINCE="-b"; LABEL="this boot"
+[ "${1:-}" = "-a" ] && { SINCE='--since=14 days ago'; LABEL="last 14 days"; }
+g=$'\e[32m'; r=$'\e[31m'; y=$'\e[33m'; o=$'\e[0m'
+fail=0
+chk() { # name, pattern, hint
+  local n=$(journalctl -k $SINCE --no-pager 2>/dev/null | grep -icE "$2")
+  if [ "$n" -eq 0 ]; then printf '%s  ok %s %-28s 0\n' "$g" "$o" "$1"
+  else printf '%s FAIL%s %-28s %d   <- %s\n' "$r" "$o" "$1" "$n" "$3"; fail=1; fi
+}
+echo "stability-check: $LABEL   (up $(uptime -p 2>/dev/null | sed 's/^up //'))"; echo
+chk "machine check / WHEA"  'machine check exception|mce:.*hardware error|whea' "back off CO / SoC voltage NOW"
+chk "kernel panic / oops"   'kernel panic|oops:|general protection fault'       "unstable core clock or RAM"
+chk "lockups"               'soft lockup|hard lockup|watchdog: bug'             "too aggressive all-core"
+chk "segfaults"             'segfault|trap invalid opcode'                      "RAM/FCLK unstable (or a bad app)"
+chk "amdgpu reset/timeout"  'amdgpu.*(reset|timeout|hang)|ring .* timeout'      "GPU undervolt too low"
+chk "EDAC memory errors"    'edac.*(error|corrected)|memory error'              "RAM instability"
+chk "thermal throttle"      'throttl|overheat|critical temp'                    "cooling / power limit"
+echo
+echo "current:"
+command -v sensors >/dev/null && sensors 2>/dev/null | grep -E 'Tctl|Tccd|junction|edge|PPT' | sed 's/^/  /'
+echo
+[ "$fail" -eq 0 ] && printf '%sclean -- no hardware distress logged%s\n' "$g" "$o" \
+                  || printf '%sinvestigate before pushing further%s\n' "$r" "$o"

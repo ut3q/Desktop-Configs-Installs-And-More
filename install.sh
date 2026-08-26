@@ -169,6 +169,29 @@ if want wallpapers; then
     run mkdir -p "$WALLPAPER_DST"
     run rsync -a --exclude='.current' "$REPO/wallpapers/" "$WALLPAPER_DST/"
     ok "$(find "$REPO/wallpapers" -type f ! -name .current | wc -l) files -> $WALLPAPER_DST"
+    # the 300 upstream-provided ones are fetched, not stored -- see wallpapers-meta/
+    UP="$REPO/wallpapers-meta/upstream-provided.txt"
+    if [ -f "$UP" ]; then
+      info_n=$(wc -l < "$UP")
+      if [ "$DRY" = 1 ]; then
+        printf '%s  would: clone SleepyCatHey/Ultimate-Win11-Setup and copy %s wallpapers%s\n' "$c_dim" "$info_n" "$c_off"
+      elif command -v git >/dev/null; then
+        tmp="$(mktemp -d)"
+        if git clone --depth 1 -q https://github.com/SleepyCatHey/Ultimate-Win11-Setup.git "$tmp/u" 2>/dev/null; then
+          n=0
+          while read -r w; do
+            [ -n "$w" ] || continue
+            [ -f "$tmp/u/Wallpapers/$w" ] && cp -n "$tmp/u/Wallpapers/$w" "$WALLPAPER_DST/" && n=$((n+1))
+          done < "$UP"
+          ok "fetched $n/$info_n wallpapers from upstream"
+          [ "$n" -lt "$info_n" ] && warn "$((info_n-n)) upstream wallpapers no longer exist there"
+        else
+          warn "could not clone the upstream wallpaper repo -- $info_n wallpapers missing"
+          warn "they are recoverable from /mnt/backup or this repo's pre-dedupe history"
+        fi
+        rm -rf "$tmp"
+      fi
+    fi
     if [ -f "$REPO/wallpapers/.current" ] && command -v caelestia >/dev/null; then
       w="$WALLPAPER_DST/$(cat "$REPO/wallpapers/.current")"
       [ -f "$w" ] && run caelestia wallpaper -f "$w" && ok "set wallpaper: $(basename "$w")"

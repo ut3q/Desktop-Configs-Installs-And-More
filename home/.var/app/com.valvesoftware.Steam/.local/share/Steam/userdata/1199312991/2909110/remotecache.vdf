@@ -1,0 +1,77 @@
+"2909110"
+{
+	"ChangeNumber"		"1"
+	"OSType"		"0"
+	"NuclearNightmare/Saved/SaveGames/CharacterSettings.sav"
+	{
+		"root"		"3"
+		"size"		"2021"
+		"localtime"		"1780810044"
+		"time"		"1780810043"
+		"remotetime"		"1780810043"
+		"sha"		"5985f4edb359d7266bd013bd2fe21a4210072410"
+		"syncstate"		"1"
+		"persiststate"		"0"
+		"platformstosync2"		"1"
+	}
+	"NuclearNightmare/Saved/SaveGames/Voipsettings.sav"
+	{
+		"root"		"3"
+		"size"		"1871"
+		"localtime"		"1780811312"
+		"time"		"1780811311"
+		"remotetime"		"1780811311"
+		"sha"		"24c6eed313edfab59949f0f6868f854f91078012"
+		"syncstate"		"1"
+		"persiststate"		"0"
+		"platformstosync2"		"1"
+	}
+	"NuclearNightmare/Saved/SaveGames/VoiceChatSettings.sav"
+	{
+		"root"		"3"
+		"size"		"2625"
+		"localtime"		"1780811505"
+		"time"		"1780811504"
+		"remotetime"		"1780811504"
+		"sha"		"a6f23fcc556b83092ffc98bc5a46ecb17b484873"
+		"syncstate"		"1"
+		"persiststate"		"0"
+		"platformstosync2"		"1"
+	}
+	"NuclearNightmare/Saved/SaveGames/HexTree_AlreadyDay.sav"
+	{
+		"root"		"3"
+		"size"		"75241"
+		"localtime"		"1780812419"
+		"time"		"1780812418"
+		"remotetime"		"1780812418"
+		"sha"		"7514249fd7a23c1b6410c51d827699a9fdabfa6c"
+		"syncstate"		"1"
+		"persiststate"		"0"
+		"platformstosync2"		"1"
+	}
+	"NuclearNightmare/Saved/SaveGames/ClothingSystemV2.sav"
+	{
+		"root"		"3"
+		"size"		"85677"
+		"localtime"		"1780812420"
+		"time"		"1780812419"
+		"remotetime"		"1780812419"
+		"sha"		"8031d661b315ab98f46d5b2a7a183f097b903dfd"
+		"syncstate"		"1"
+		"persiststate"		"0"
+		"platformstosync2"		"1"
+	}
+	"NuclearNightmare/Saved/SaveGames/EmoteSave.sav"
+	{
+		"root"		"3"
+		"size"		"9510"
+		"localtime"		"1780812421"
+		"time"		"1780812420"
+		"remotetime"		"1780812420"
+		"sha"		"d29d9b1ba2f1c91357348b414f0bfe1e2f6e3ea8"
+		"syncstate"		"1"
+		"persiststate"		"0"
+		"platformstosync2"		"1"
+	}
+}

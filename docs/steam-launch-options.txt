@@ -1,0 +1,8 @@
+# Steam per-game launch options
+# Extracted from localconfig.vdf, which is NOT stored in this repo --
+# it carries SharedAuth keys and signed app ownership tickets.
+# Re-apply these by hand in Steam: right-click game > Properties > Launch Options.
+
+346110     +fps_max 170
+
+# 1 games with custom launch options

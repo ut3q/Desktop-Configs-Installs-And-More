@@ -53,7 +53,8 @@ repo    .config/hypr                      # also bundle its git history
 | `system/` | `/usr/local/bin` scripts (`backup-mirror`, `arch-cleaner`, `discord-updater`) and the `backup-mirror` systemd unit + excludes |
 | `packages/` | 130 official + 22 AUR + 8 flatpak, plus the enabled-unit lists |
 | `repos/` | `git bundle` archives — full commit history for repos that exist nowhere else |
-| `wallpapers/` | 902 files (1.3G); `.current` records which one is active |
+| `wallpapers/` | 602 files (492M), losslessly optimized; `.current` records the active one |
+| `wallpapers-meta/` | the 300 wallpapers fetched from upstream instead of stored — see below |
 | `docs/` | `fstab.reference`, `system-snapshot.txt` — reference only, never auto-applied |
 
 ### Git bundles
@@ -65,6 +66,49 @@ Inspect one by hand with:
 
 ```bash
 git clone repos/config-hypr.bundle /tmp/hypr && git -C /tmp/hypr log
+```
+
+## Wallpapers
+
+Optimized losslessly with `oxipng`/`jpegoptim`: **1.40 GB → 0.83 GB** on disk.
+Of 902 files, **300 were verified byte-identical** to
+[SleepyCatHey/Ultimate-Win11-Setup](https://github.com/SleepyCatHey/Ultimate-Win11-Setup)
+and are not stored here — `install.sh` clones that repo and copies them in,
+saving 354 MB. Verification compared upstream file sizes against the
+pre-optimization originals in the backup mirror, so it is an exact match, not
+a guess by filename.
+
+If upstream ever vanishes, those files are still in `/mnt/backup` and in this
+repo's history prior to the dedupe commit.
+
+To re-optimize after adding new wallpapers, re-run the optimizer, then
+`./capture.sh`.
+
+## Steam game saves
+
+| Stored here | Not stored |
+|---|---|
+| `userdata/` — Steam Cloud payloads (Monster Hunter World's `SAVEDATA1000`) and client config, 23 MB | Steam's root `config.vdf`, `loginusers.vdf`, `ssfn*` — **account auth material**, excluded in the manifest, `capture.sh` and `.gitignore` |
+| ARK `Config/`, `LocalProfiles/`, `SaveGames/` — 612 KB | ARK `SavedArksLocal/` etc — 308 MB of world saves that churn every session |
+
+ARK's world saves would add ~300 MB to history *per capture*, so they go to the
+local mirror instead: `backup-mirror` has a second rsync pass covering them,
+since the main exclude list drops all of `~/.var/app/com.valvesoftware.Steam`
+(448 GB of re-downloadable games). Install it with:
+
+```bash
+./install.sh --only system
+```
+
+## stability-check
+
+`.local/bin/stability-check` counts MCEs, panics, lockups, segfaults, amdgpu
+resets, EDAC errors and thermal throttling, then prints current temps. Run it
+after a BIOS/tuning change and a session of real load.
+
+```bash
+stability-check       # this boot
+stability-check -a    # last 14 days
 ```
 
 ## flatpak-temp

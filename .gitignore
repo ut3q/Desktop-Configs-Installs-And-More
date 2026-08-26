@@ -24,6 +24,7 @@ home/.config/**/Cache/
 home/.config/**/GPUCache/
 home/.config/**/Crashpad/
 home/.config/**/logs/
+home/.config/**/Logs/
 *.log
 *.sqlite-wal
 *.sqlite-shm
@@ -44,3 +45,9 @@ id_ed25519*
 *cookies*
 *.cookies
 cookies*.txt
+
+# ---- Steam auth material. NEVER commit. ----
+**/ssfn*
+**/loginusers.vdf
+**/config/config.vdf
+**/localconfig.vdf

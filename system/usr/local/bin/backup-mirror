@@ -29,6 +29,23 @@ if [ $rc -ne 0 ] && [ $rc -ne 24 ]; then
   exit $rc
 fi
 
+# --- game saves -------------------------------------------------------------
+# The exclude list drops ~/.var/app/com.valvesoftware.Steam wholesale: 448G of
+# re-downloadable game data. But SAVES are not re-downloadable, and ARK keeps
+# its worlds inside the game directory rather than in Steam Cloud. Mirror just
+# those, in a second pass, so they are covered without dragging in the games.
+SAVE_SRC=(
+  "/home/aqua/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/common/ARK/ShooterGame/Saved"
+)
+for src in "${SAVE_SRC[@]}"; do
+  [ -d "$src" ] || continue
+  dst="$DEST/current${src}"
+  mkdir -p "$(dirname "$dst")"
+  rsync -aAX --delete --exclude='Logs/' "$src/" "$dst/" \
+    && log "game saves: $(basename "$(dirname "$src")") $(du -sh "$dst" 2>/dev/null | cut -f1)" \
+    || log "WARNING: game-save sync failed for $src"
+done
+
 SNAP="$DEST/snapshots/$(date +%Y-%m-%d_%H%M%S)"
 btrfs subvolume snapshot -r "$DEST/current" "$SNAP" >/dev/null && log "snapshot: $SNAP"
 

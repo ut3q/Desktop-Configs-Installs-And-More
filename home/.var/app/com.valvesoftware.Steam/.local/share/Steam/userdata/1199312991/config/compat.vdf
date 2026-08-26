@@ -1,0 +1,38 @@
+"platform_overrides"
+{
+	"346110"
+	{
+		"dest"		"linux"
+		"src"		"windows"
+	}
+	"2909110"
+	{
+		"dest"		"linux"
+		"src"		"windows"
+	}
+	"3241660"
+	{
+		"dest"		"linux"
+		"src"		"windows"
+	}
+	"4704690"
+	{
+		"dest"		"linux"
+		"src"		"windows"
+	}
+	"361420"
+	{
+		"dest"		"linux"
+		"src"		"windows"
+	}
+	"582010"
+	{
+		"dest"		"linux"
+		"src"		"windows"
+	}
+	"1149460"
+	{
+		"dest"		"linux"
+		"src"		"windows"
+	}
+}

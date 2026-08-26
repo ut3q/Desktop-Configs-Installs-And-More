@@ -23,6 +23,10 @@ RSYNC_EX=(
   --exclude='*.orig' --exclude='*~' --exclude='*.original-backup'
   --exclude='Cache/' --exclude='GPUCache/' --exclude='Crashpad/'
   --exclude='*.log' --exclude='*.sock' --exclude='*.pid'
+  --exclude='Logs/' --exclude='logs/'
+  --exclude='ssfn*' --exclude='loginusers.vdf' --exclude='config.vdf'
+  --exclude='localconfig.vdf'          # SharedAuth key + signed app ownership tickets
+  --exclude='ugcmsgcache/' --exclude='ugc/'
   --exclude='*.sqlite-wal' --exclude='*.sqlite-shm'
   --exclude='*cookies*' --exclude='*.cookies'
   --exclude='dist/' --exclude='equicord.asar' --exclude='build/'
@@ -90,8 +94,17 @@ systemctl --user list-unit-files --state=enabled --no-legend --no-pager 2>/dev/n
 # --------------------------------------------------------------------- wallpapers
 step "wallpapers"
 if [ -d "$WALLPAPER_SRC" ]; then
-  rsync -a --delete --exclude='.cache/' "$WALLPAPER_SRC/" "$REPO/wallpapers/" \
-    && ok "$(find "$REPO/wallpapers" -type f | wc -l) files, $(du -sh "$REPO/wallpapers" | cut -f1)"
+  # 300 wallpapers come from the SleepyCatHey upstream repo and are re-fetched by
+  # install.sh instead of being stored here. See wallpapers-meta/UPSTREAM.md.
+  UP="$REPO/wallpapers-meta/upstream-provided.txt"
+  if [ -f "$UP" ]; then
+    rsync -a --delete --exclude='.cache/' --exclude-from="$UP" \
+      "$WALLPAPER_SRC/" "$REPO/wallpapers/" \
+      && ok "$(find "$REPO/wallpapers" -type f | wc -l) stored, $(du -sh "$REPO/wallpapers" | cut -f1) ($(wc -l < "$UP") from upstream, not stored)"
+  else
+    rsync -a --delete --exclude='.cache/' "$WALLPAPER_SRC/" "$REPO/wallpapers/" \
+      && ok "$(find "$REPO/wallpapers" -type f | wc -l) files, $(du -sh "$REPO/wallpapers" | cut -f1)"
+  fi
   cur="$HOME/.local/state/caelestia/wallpaper/path.txt"
   [ -f "$cur" ] && basename "$(cat "$cur")" > "$REPO/wallpapers/.current" && ok "current: $(cat "$REPO/wallpapers/.current")"
 else

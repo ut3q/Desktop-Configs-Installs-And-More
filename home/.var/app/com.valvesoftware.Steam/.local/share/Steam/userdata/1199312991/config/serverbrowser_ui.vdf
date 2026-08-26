@@ -1,0 +1,62 @@
+"SavedData"
+{
+	"GameList"		"favorites"
+	"Filters"
+	{
+		"InternetGames"
+		{
+			"game"		"ark_survival_evolved"
+			"appid"		"407530"
+			"map"		"LostIsland"
+			"ping"		"0"
+			"NoFull"		"0"
+			"NoEmpty"		"0"
+			"NoPassword"		"0"
+			"Secure"		"2"
+		}
+		"LanGames"
+		{
+			"game"		""
+			"appid"		"0"
+			"map"		""
+			"ping"		"0"
+			"NoFull"		"0"
+			"NoEmpty"		"0"
+			"NoPassword"		"0"
+			"Secure"		"0"
+		}
+		"FavoriteGames"
+		{
+			"game"		"ark_survival_evolved"
+			"appid"		"346110"
+			"map"		""
+			"ping"		"0"
+			"NoFull"		"0"
+			"NoEmpty"		"0"
+			"NoPassword"		"0"
+			"Secure"		"0"
+		}
+		"FriendsGames"
+		{
+			"game"		""
+			"appid"		"0"
+			"map"		""
+			"ping"		"0"
+			"NoFull"		"0"
+			"NoEmpty"		"0"
+			"NoPassword"		"0"
+			"Secure"		"0"
+		}
+		"HistoryGames"
+		{
+			"game"		""
+			"appid"		"0"
+			"map"		""
+			"ping"		"0"
+			"NoFull"		"0"
+			"NoEmpty"		"0"
+			"NoPassword"		"0"
+			"Secure"		"0"
+		}
+	}
+}
