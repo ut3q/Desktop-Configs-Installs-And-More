@@ -1,6 +1,7 @@
 avahi-daemon.service
 bluetooth.service
 getty@.service
+lactd.service
 NetworkManager-dispatcher.service
 NetworkManager-wait-online.service
 NetworkManager.service
